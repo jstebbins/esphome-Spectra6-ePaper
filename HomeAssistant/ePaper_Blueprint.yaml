@@ -1,0 +1,288 @@
+blueprint:
+  name: ePaper Slideshow
+  description: Show a slideshow on an ePaper display
+  domain: automation
+  input:
+    slideshow_start:
+      name: Automation Trigger Entity
+      description: Switch that starts the slideshow automation
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain:
+              - switch
+              - light
+              - binary_sensor
+              - input_boolean
+    slideshow_enable:
+      name: Play/Pause Entity (Optional)
+      description: Switch used to play/pause the slideshow
+      default: {}
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain:
+              - switch
+              - light
+              - binary_sensor
+              - input_boolean
+    epaper_devices:
+      name: ePaper Devices
+      description: Devices to send images to
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: esphome
+              manufacturer: "Stebbins"
+              model: "ePaperDisplay"
+    slideshow_schedule:
+      name: Slideshow Schedule
+      description: Specify when images are updated
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain:
+              - schedule
+    image_source:
+      name: File List Entity
+      description: An entity containing the URL as state value and a filelist attribute
+      selector:
+        entity:
+          filter:
+            domain:
+              - sensor
+variables:
+  image_source: !input image_source
+  base_url: '{{ states( image_source ) }}'
+  slideshow_schedule: !input slideshow_schedule
+  slideshow_enable: !input slideshow_enable
+
+triggers:
+  - trigger: state
+    entity_id: !input slideshow_start
+    from:
+    to:
+    - 'on'
+  - trigger: homeassistant
+    event: start
+conditions:
+  - condition: switch.is_on
+    target:
+      entity_id: !input slideshow_start
+    options:
+      behavior: any
+      for: 00:00:00
+actions:
+  - variables:
+      RandoImages: '{{ shuffle(state_attr(image_source, "filelist")) }}'
+      image_source_sha: '{{ state_attr( image_source, "sha256sum" ) }}'
+      image_index: 0
+      image_count: '{{ RandoImages | length }}'
+      day_names: '{{ ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] }}'
+      last_scheduled_time: '{{ as_timestamp(now()) }}'
+  - repeat:
+      while:
+        - condition: switch.is_on
+          target:
+            entity_id: !input slideshow_start
+          options:
+            behavior: any
+            for: 00:00:00
+      sequence:
+        - wait_for_trigger:
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: wake_at_timeout
+            options:
+              event_type:
+              - wake_at_timeout
+            variables:
+              next_prev: 1
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: right_button_press
+            options:
+              event_type:
+              - right_button_press
+            variables:
+              next_prev: 1
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: left_button_press
+            options:
+              event_type:
+              - left_button_press
+            variables:
+              next_prev: -1
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: refresh_button_press
+            options:
+              event_type:
+              - refresh_button_press
+            variables:
+              next_prev: 0
+          - trigger: switch.turned_off
+            target:
+              entity_id: !input slideshow_start
+            id: slideshow_off
+            options:
+              behavior: each
+              for: 00:00:00
+            variables:
+              next_prev: 0
+          continue_on_timeout: false
+        - condition: switch.is_on
+          target:
+            entity_id: !input slideshow_start
+          options:
+            behavior: any
+            for: 00:00:00
+        - choose:
+          - conditions: '{{ wait.trigger.id == "wake_at_timeout" }}'
+            sequence:
+              - variables:
+                  advance_schedule: true
+                button_press: false
+                  next_prev: 1
+          - conditions: '{{ wait.trigger.id == "right_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: false
+                  button_press: true
+                  next_prev: 1
+          - conditions: '{{ wait.trigger.id == "left_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: false
+                  button_press: true
+                  next_prev: -1
+          - conditions: '{{ wait.trigger.id == "refresh_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: true
+                  button_press: true
+                  next_prev: 0
+          default:
+            - variables:
+                advance_schedule: false
+                button_press: false
+                next_prev: 0
+        - variables:
+            epaper_device: '{{ device_id( wait.trigger.entity_id ) }}'
+            image_url_entity: '{{ device_entities(epaper_device) | select("match", ".*_image_url") | first }}'
+            refresh_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_refresh_display") | first }}'
+            sleep_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_sleep") | first }}'
+            wake_at_entity: '{{ device_entities(epaper_device) | select("match", ".*_wake_at") | first }}'
+            wake_timer_type: '{{ device_entities(epaper_device) | select("match", ".*_wake_timer_type") | first }}'
+            next_wake_time: '{{ as_timestamp(now() + timedelta(days=1)) }}'
+        - if:
+            - condition: template
+              value_template: '{{ image_source_sha != state_attr( image_source, "sha256sum" ) }}'
+          then:
+            - variables:
+                RandoImages: '{{ shuffle(state_attr(image_source, "filelist")) }}'
+                image_source_sha: '{{ state_attr( image_source, "sha256sum" ) }}'
+                image_index: 0
+                image_count: '{{ RandoImages | length }}'
+        - if:
+            - condition: template
+              value_template: '{{ slideshow_enable | length == 0 or is_state(slideshow_enable, "on") or button_press }}'
+          then:
+            - variables:
+                image_index: >-
+                  {% set image_index = image_index + next_prev %}
+                  {% if image_index < 0 %}
+                    {% set image_index = image_count - 1 %}
+                  {% elif image_index >= image_count %}
+                    {% set image_index = 0 %}
+                  {% endif %}
+                  {{ image_index }}
+            - action: text.set_value
+              metadata: {}
+              target:
+                entity_id: '{{ image_url_entity }}'
+              data:
+                value: '{{ base_url + ''/'' + (RandoImages[image_index] | urlencode) }}'
+            - delay:
+                hours: 0
+                minutes: 0
+                seconds: 2
+                milliseconds: 0
+            - action: button.press
+              metadata: {}
+              target:
+                entity_id: '{{ refresh_button_entity }}'
+              data: {}
+        - if:
+            - condition: template
+              value_template: '{{ advance_schedule }}'
+          then:
+            - action: schedule.get_schedule
+              target:
+                entity_id: !input slideshow_schedule
+              response_variable: wake_schedule
+            - variables:
+                next_wake_time: >-
+                  {% set tomorrow = now() + timedelta(days=1) %}
+                  {% set day_of_week = day_names[now().weekday()] %}
+                  {% set prefix = now().strftime('%Y-%m-%dT') %}
+                  {% set tz = now().strftime('%z') %}
+                  {% if now() > as_datetime(last_scheduled_time) %}
+                    {% set last_scheduled_time = as_timestamp(now()) %}
+                  {% endif %}
+                  {% set ns = namespace(next_wake_time=tomorrow, next_wake_found=false) %}
+                  {% for event in wake_schedule[slideshow_schedule][day_of_week] %}
+                    {% set from = event.from.strftime("%H:%M:%S") %}
+                    {% set start = as_datetime(prefix + from + tz) %}
+                    {% if start > as_datetime(last_scheduled_time) %}
+                      {% set ns.next_wake_time = start %}
+                      {% set ns.next_wake_found = true %}
+                      {% break %}
+                    {% endif %}
+                  {% endfor %}
+                  {% if not ns.next_wake_found %}
+                    {% set prefix = tomorrow.strftime('%Y-%m-%dT') %}
+                    {% set day_of_week = day_names[tomorrow.weekday()] %}
+                    {% for event in wake_schedule[slideshow_schedule][day_of_week] %}
+                      {% set from = event.from.strftime("%H:%M:%S") %}
+                      {% set start = as_datetime(prefix + from + tz) %}
+                      {% if start > as_datetime(last_scheduled_time) and start < tomorrow %}
+                        {% set ns.next_wake_time = start %}
+                        {% set ns.next_wake_found = true %}
+                        {% break %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                  {{ as_timestamp(ns.next_wake_time) }}
+                last_scheduled_time: '{{ next_wake_time }}'
+            - action: time.set_value
+              metadata: {}
+              target:
+                entity_id: '{{ wake_at_entity }}'
+              data:
+                time: '{{ (as_datetime(next_wake_time) | as_local).time() }}'
+            - action: select.select_option
+              metadata: {}
+              target:
+                entity_id: '{{ wake_timer_type }}'
+              data:
+                option: Wake At
+        - delay:
+            hours: 0
+            minutes: 0
+            seconds: 4
+            milliseconds: 0
+        - action: button.press
+          metadata: {}
+          target:
+            entity_id: '{{ sleep_button_entity }}'
+          data: {}

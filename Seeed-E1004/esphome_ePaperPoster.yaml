@@ -1,0 +1,992 @@
+# =============================================================================
+# Based on reTerminal E1004 - ESPHome Full Hardware Example
+# https://seeed-projects.github.io/OSHW-reTerminal-Series-E-D/?platform=esphome&device=E1004
+# =============================================================================
+#
+# Hardware list:
+#   1. 13.3" 6-color ePaper display (1200x1600, T133A01)
+#   2. 3x front buttons (GPIO3, GPIO4, GPIO5)
+#   3. Buzzer (GPIO45, PWM)
+#   4. Onboard LED (GPIO48)
+#   5. Battery voltage (GPIO1 ADC + GPIO21 EN)
+#   6. SHT4x temp & humidity sensor (I2C)
+#   7. PCF8563 RTC (I2C addr 0x51, CR1220 backup)
+#   8. MicroSD card slot (SPI + DET=15, EN=16)
+#   9. Deep sleep with GPIO4 button wake-up
+#
+# Requires ESPHome >= 2026.7.0 for the epaper_spi E1004 model.
+#
+# Serial debug: UART0 via CH340K USB bridge
+# =============================================================================
+
+globals:
+  # When woken from deep sleep, record the cause here
+  # This will be used to publish a wake cause event
+  # to HA after a client connection is established.
+  - id: wake_source
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Reference counted sleep prevent/allow
+  - id: sleep_prevent_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Sleep gets disabled if cycle time <= run time
+  - id: sleep_enabled
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  # Track if sleep will occur when allowed
+  - id: sleep_pending
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Track when we wake from sleep. If we are put to sleep early
+  # we must adjust the sleep period to keep the cycle time accurate.
+  - id: run_start_time
+    type: long int
+    restore_value: false
+    initial_value: '0'
+  # Convenience flag to let us know we are waking on a constant cycle
+  - id: use_wake_every
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  # When the esp32 internal RTC wakes us early, this is the amount
+  # of time we must wait before sending the wake_at_timeout event.
+  - id: wake_at_delay
+    type: int
+    restore_value: false
+    initial_value: '0'
+    
+substitutions:
+  device_name: poster-seeed-e1004
+  friendly_name: "PosterSeeed"
+  # Note: initial_run_sleep_cycle - initial_run_duration must be positive.
+  # If you want to disable deep sleep, you will need to adjust the deep_sleep component
+  initial_run_duration: 2
+  initial_run_sleep_cycle: 10
+
+esphome:
+  name: ${device_name}
+  name_add_mac_suffix: true
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      # Turn on SD card power rail / 打开 SD 卡供电
+      - output.turn_on: bsp_sd_enable
+      # Turn on battery measurement circuit
+      - output.turn_on: bsp_battery_enable
+      # Wait for voltages to stabilize / 等待电压稳定
+      - delay: 200ms
+      # Take the first temperature and humidity reading
+      - component.update: sht4x_sensor
+      - wait_until:
+          condition:
+            lambda: return id(temp_sensor).has_state() && id(hum_sensor).has_state();
+          timeout: 5s
+      # Take first battery reading / 采集首次电池读数
+      - component.update: battery_voltage
+      - component.update: battery_level
+      # Read external RTC time on boot / 启动时读取 RTC 时间
+      - pcf8563.read_time:
+      # Start the run timer. When it expires, we go into deep sleep mode
+      - lambda: |-
+          id(dsleep).set_run_duration(id(run_duration).state * 60 * 1000);
+          // Start the run timer
+          id(dsleep).setup();
+          id(run_start_time) = id(rtc_time).now().timestamp;
+      - logger.log:
+          format: 'Run start time: %ld'
+          args: ['id(run_start_time)']
+      # Initialize 'sleep_duration' for deep sleep
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: !lambda "return id(run_duration).state;"
+          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+          wake_hour: !lambda "return id(wake_time).hour;"
+          wake_minute: !lambda "return id(wake_time).minute;"
+      # Run a short buzzer if wakeing up from button press
+      # to indicate we are alive
+      - if:
+          condition:
+            lambda: 'return (id(wake_source) != 0 && id(wake_source) != 1);'
+          then:
+            - light.turn_on:
+                id: buzzer
+                brightness: 50%
+            - delay: 250ms
+            - light.turn_off: buzzer
+      # The text component ImageURL gets restored upon reboot,
+      # but the online_image current_image.url does not. 
+      # Copy ImageURL to current_image.url
+      - online_image.set_url:
+          id: current_image
+          update: false
+          url: !lambda return id(ImageURL).state;
+      - logger.log:
+          format: 'Init Image URL: %s'
+          args: ['id(ImageURL).state.c_str()']
+
+  # Set an identifiable Manufacturer.Model that can be used in blueprints
+  # to limit device options to devices that support the features implemented here.
+  project:
+    name: Stebbins.ePaperDisplay
+    version: dev
+
+esp32:
+  board: seeed_xiao_esp32s3
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP_CONSOLE_UART_NUM: "0"
+      CONFIG_ESP_CONSOLE_UART_TX_GPIO: "43"
+      CONFIG_ESP_CONSOLE_UART_RX_GPIO: "44"
+      # At the default 40Mhz psram speed, full screen image render exceeds
+      # the default task WDT of 5s. Extend the task WDT to 10s to
+      # prevent WDT reboot.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+# OPI PSRAM stores the 6-color display framebuffer.
+psram:
+  mode: octal
+  # At the default 40Mhz psram speed, full screen image render exceeds
+  # the default task WDT of 5s. Boost psram speed to 80Mhz to
+  # prevent WDT reboot.
+  #
+  # I have not found documentation that definitively specs the
+  # speed of the psram used in this device. This is working for me
+  # but YMMV
+  speed: 80MHZ
+  ignore_not_found: false
+
+# Enable serial logging / 启用串口日志
+# The reTerminal E series has a CH340K USB-to-UART bridge on UART0.
+# Default ESP32-S3 logger uses USB_CDC — won't produce output on the physical port.
+# reTerminal E 系列板载 CH340K 桥接芯片，串口走 UART0，非默认的 USB_CDC。
+logger:
+  hardware_uart: UART0
+
+# SPI — shared by ePaper display and SD card
+# SPI — 墨水屏和 SD 卡共用
+spi:
+  id: epaper_spi_bus
+  clk_pin: GPIO7
+  mosi_pin: GPIO9
+  # MISO is needed for SD card reading (ePaper is write-only)
+  # MISO 用于 SD 卡读取（墨水屏只写不读）
+  miso_pin: GPIO8
+
+# I2C — shared by SHT4x sensor, PCF8563 RTC
+# I2C — SHT4x 传感器和 PCF8563 实时时钟共用
+i2c:
+  scl: GPIO20
+  sda: GPIO19
+
+output:
+  # [4] Onboard LED (active low)
+  # It's really unfortunate that this LED is not visible from the
+  # front of the picture frame. It would be useful as an
+  # activity indicator if it was :(
+  - platform: gpio
+    pin: GPIO48
+    id: bsp_led
+
+  # [9] SD card power enable
+  - platform: gpio
+    pin: GPIO16
+    id: bsp_sd_enable
+
+  # [5] Battery measurement enable
+  - platform: gpio
+    pin: GPIO21
+    id: bsp_battery_enable
+
+  # [3] Buzzer PWM output
+  - platform: ledc
+    pin: GPIO45
+    id: buzzer_pwm
+    frequency: 1000Hz
+
+sensor:
+  # --- Battery voltage (ADC on GPIO1) ---
+  - platform: adc
+    pin: GPIO1
+    name: "Battery Voltage"
+    id: battery_voltage
+    update_interval: 60s
+    attenuation: 12db
+    filters:
+      # Compensate for onboard voltage divider (1:2)
+      # 补偿板载分压电阻（1:2 比例）
+      - multiply: 2.0
+
+  # --- Battery level (percentage) ---
+  - platform: template
+    name: "Battery Level"
+    id: battery_level
+    unit_of_measurement: "%"
+    icon: "mdi:battery"
+    device_class: battery
+    state_class: measurement
+    lambda: 'return id(battery_voltage).state;'
+    update_interval: 60s
+    filters:
+      - calibrate_linear:
+          - 4.15 -> 100.0
+          - 3.96 -> 90.0
+          - 3.91 -> 80.0
+          - 3.85 -> 70.0
+          - 3.80 -> 60.0
+          - 3.75 -> 50.0
+          - 3.68 -> 40.0
+          - 3.58 -> 30.0
+          - 3.49 -> 20.0
+          - 3.41 -> 10.0
+          - 3.30 -> 5.0
+          - 3.27 -> 0.0
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  # --- SHT4x temperature & humidity (I2C) ---
+  - platform: sht4x
+    id: sht4x_sensor
+    temperature:
+      name: "Temperature"
+      id: temp_sensor
+    humidity:
+      name: "Relative Humidity"
+      id: hum_sensor
+    update_interval: 60s
+
+binary_sensor:
+  # API Connection status
+  - platform: status
+    name: "API Connection"
+
+  # KEY3 (GPIO3)
+  - platform: gpio
+    pin:
+      number: GPIO3
+      allow_other_uses: true
+      mode: INPUT
+      inverted: true
+    id: button_3
+    name: "KEY3 Right Direction Button"
+    internal: true
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_press:
+      then:
+        - logger.log: "KEY3 (GPIO3) pressed"
+        - event.trigger: 
+            id: events
+            event_type: right_button_press
+        # Make some noise to acknowledge that the button press was recognized
+        - light.turn_on:
+            id: buzzer
+            brightness: 50%
+        - delay: 250ms
+        - light.turn_off: buzzer
+        # I would like to restart the run timout, but esphome doesn't support this :(
+    on_double_click:
+      then:
+      - logger.log: "KEY3 (GPIO3) double pressed"
+      - event.trigger: 
+          id: events
+          event_type: right_button_double_press
+
+  # KEY4 (GPIO4)
+  - platform: gpio
+    pin:
+      number: GPIO4
+      allow_other_uses: true
+      mode: INPUT
+      inverted: true
+    id: button_4
+    name: "KEY4 Left Direction Button"
+    internal: true
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_press:
+      then:
+        - logger.log: "KEY4 (GPIO4) pressed"
+        - event.trigger: 
+            id: events
+            event_type: left_button_press
+        # Make some noise to acknowledge that the button press was recognized
+        - light.turn_on:
+            id: buzzer
+            brightness: 50%
+        - delay: 250ms
+        - light.turn_off: buzzer
+        # I would like to restart the run timout, but esphome doesn't support this :(
+    on_double_click:
+      then:
+      - logger.log: "KEY4 (GPIO4) double pressed"
+      - event.trigger: 
+          id: events
+          event_type: left_button_double_press
+
+  # KEY5 (GPIO5)
+  - platform: gpio
+    pin:
+      number: GPIO5
+      allow_other_uses: true
+      mode: INPUT
+      inverted: true
+    id: button_5
+    name: "KEY5 Refresh Button"
+    internal: true
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_press:
+      then:
+        - logger.log: "KEY5 (GPIO5) pressed"
+        - event.trigger: 
+            id: events
+            event_type: refresh_button_press
+        # Make some noise to acknowledge that the button press was recognized
+        - light.turn_on:
+            id: buzzer
+            brightness: 50%
+        - delay: 250ms
+        - light.turn_off: buzzer
+        # I would like to restart the run timout, but esphome doesn't support this :(
+    on_double_click:
+      then:
+      - logger.log: "KEY5 (GPIO5) double pressed"
+      - event.trigger: 
+          id: events
+          event_type: refresh_button_double_press
+
+  # [9] SD card detect (LOW = card present)
+  # SD 卡检测（低电平 = 卡已插入）
+  #
+  # NOTE on SD card in ESPHome:
+  # ESPHome cannot directly access the SD card file system (read/write files,
+  # create directories, etc.) the way Arduino can. In ESPHome, the SD card is
+  # used indirectly by specific components:
+  #   - online_image: caches downloaded images to SD card
+  #   - media_player: plays audio files stored on the card
+  #   - Works with PSRAM for large buffer allocation
+  # For direct file operations (e.g. recording WAV files), use the Arduino framework.
+  #
+  # ESPHome 中 SD 卡的限制：
+  # ESPHome 不能像 Arduino 那样直接操作 SD 卡文件系统（读写文件、创建目录等）。
+  # SD 卡在 ESPHome 中由特定组件间接使用：
+  #   - online_image：将下载的图片缓存到 SD 卡
+  #   - media_player：播放卡上存储的音频文件
+  #   - 配合 PSRAM 做大缓冲
+  # 如需直接操作文件（如录音存 WAV），请使用 Arduino 框架。
+  - platform: gpio
+    pin:
+      number: GPIO15
+      mode: INPUT_PULLUP
+      inverted: true
+    id: sd_card_detect
+    name: "SD Card Detected"
+
+script:
+  # The esp32 internal RTC doesn't have a crystal and drifts, causing the time that we wake to
+  # be inaccurate - early in every case I've seen. This script will wait for the requested 
+  # wake time and then fire an event to notify that the actual requested time has arrived.
+  #
+  # If the calculated delay time is longer than the set run time, re-enter sleep.
+  - id: wake_time_timer
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(use_wake_every);'
+          then:
+            # Calculate how early we woke
+            - lambda: |-
+                ESPTime  espNow    = id(rtc_time).now();
+                long int now       = espNow.timestamp;
+      
+                std::tm next_tm = {};
+                next_tm.tm_year = espNow.year - 1900;
+                next_tm.tm_mon  = espNow.month - 1;
+                next_tm.tm_mday = espNow.day_of_month;
+                next_tm.tm_hour = id(wake_time).hour;
+                next_tm.tm_min  = id(wake_time).minute;
+                next_tm.tm_sec  = 0;
+                
+                long int wake_time = mktime(&next_tm) - espNow.timezone_offset();
+                if (now > wake_time + 60 * 60 * 12) {
+                  // Roll-over to the next day
+                  wake_time += 60 * 60 * 24;
+                }
+      
+                ESP_LOGD("wake_time_timer", "now %ld wake_time %ld", now, wake_time);
+                id(wake_at_delay) = wake_time - now;
+            - if:
+                condition:
+                  lambda: 'return id(wake_at_delay) <= 0;'
+                then:
+                  - logger.log:
+                      format: "Woke late or on time %d sec"
+                      args: ['id(wake_at_delay)']
+                  - event.trigger: 
+                      id: events
+                      event_type: wake_at_timeout
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return id(wake_at_delay) > id(run_duration).state * 60 + 30;'
+                      then:
+                        # We can safely stay awake and let the run time expire. The sleep
+                        # timer will wake us again prior to the desired wake time.
+                        - logger.log: 
+                            format: "Woke very early, sleeping for %d sec"
+                            args: ['id(wake_at_delay)']
+                  - if:
+                      condition:
+                        lambda: 'return id(wake_at_delay) < id(run_duration).state * 60 - 30;'
+                      then:
+                        # We can safely delay (run time won't expire before delay completes)
+                        - logger.log: 
+                            format: "Delay till 'Wake At' time %d sec"
+                            args: ['id(wake_at_delay)']
+                        - delay: !lambda "return id(wake_at_delay) * 1000;"
+                        - event.trigger: 
+                            id: events
+                            event_type: wake_at_timeout
+                      else:
+                        # No man's land. We risk rescheduling wake up for tomorrow if we
+                        # let run time expire and we risk run time expiring if we delay.
+                        - logger.log: 
+                            format: "Woke early, sleeping... calculated delay %ds"
+                            args: ['id(wake_at_delay)']
+                        # If I let the run time expire, it may try to reschedule
+                        # for the same time tomorrow. So delay for a period of time
+                        # that is less than the run time. Then force a sleep so that
+                        # we wake again at the expected time.
+                        - delay: 30s
+                        - script.execute: do_sleep
+          
+  # Handle changes to sleep duration
+  #
+  # run_duration    - minutes
+  #                   Used to adjust 'sleep_duration' when 'wake_time' is used
+  # run_sleep_cycle - minutes
+  #                   When not using 'wake_at' sleep type, this is the run/sleep cycle time.
+  #                   If run_duration >= run_sleep_cycle, sleep is disabled.
+  # wake_hour       - HH:MM time to wake when using 'wake_at' sleep type
+  # wake_minute
+  #
+  # Ideally, this would be called just prior to going into deep sleep
+  # so that 'wake time' can be correctly calculated based on when
+  # sleep starts. But there is no callback to alert us at the end
+  # of 'run_duration' that we are entering the sleep period. So as
+  # a work-around, this gets called at boot time, any time values change,
+  # and when sleep is initiated manually.
+  - id: eval_sleep_duration
+    mode: restart
+    parameters: 
+      run_duration: int # in minutes
+      run_sleep_cycle: int # minutes
+      wake_hour: int
+      wake_minute: int
+    then:
+      - lambda: |-
+          ESP_LOGD("eval_sleep_duration", "cycle %d, run %d, whour %d, wmin %d", run_sleep_cycle, run_duration, wake_hour, wake_minute);
+          long int duration;
+          if (id(use_wake_every))
+            duration = (run_sleep_cycle - run_duration) * 60 * 1000;
+          else {
+            ESPTime  espNow    = id(rtc_time).now();
+            long int now       = espNow.timestamp;
+            long int runtime   = now - id(run_start_time);
+            long int remaining = run_duration * 60 - runtime;
+            long int run_end   = now;
+            if (remaining > 0)
+              run_end += remaining;
+
+            std::tm next_tm = {};
+            next_tm.tm_year = espNow.year - 1900;
+            next_tm.tm_mon  = espNow.month - 1;
+            next_tm.tm_mday = espNow.day_of_month;
+            next_tm.tm_hour = wake_hour;
+            next_tm.tm_min  = wake_minute;
+            next_tm.tm_sec  = 0;
+            
+            long int next = mktime(&next_tm) - espNow.timezone_offset();
+            ESP_LOGD("eval_sleep_duration", "now year %d mon %d mday %d hour %d min %d", 
+              next_tm.tm_year, next_tm.tm_mon, next_tm.tm_mday, next_tm.tm_hour, next_tm.tm_min);
+            ESP_LOGD("eval_sleep_duration", "now %ld next %ld run_end %ld diff %ld run_start_time %ld remaining %ld tzo %ld", 
+              now, next, run_end, next - run_end, id(run_start_time), remaining, espNow.timezone_offset());
+            if (next > run_end)
+              duration = (next - run_end) * 1000;
+            else
+              duration = (60 * 60 * 24 + next - run_end) * 1000;
+          }
+          if (id(sleep_enabled) && duration <= 0) {
+            ESP_LOGD("eval_sleep_duration", "sleep prevent");
+            id(sleep_enabled) = false;
+            id(sleep_prevent).execute();
+          }
+          if (duration > 0) {
+            ESP_LOGD("eval_sleep_duration", "Set sleep duration: %ld ms", duration);
+            id(dsleep).set_sleep_duration(duration);
+          }
+          if (!id(sleep_enabled) && duration > 0) {
+            ESP_LOGD("eval_sleep_duration", "sleep allow");
+            id(sleep_enabled) = true;
+            id(sleep_allow).execute();
+          }
+    
+    # Handle request to immediately enter deep sleep
+  - id: do_sleep
+    mode: single
+    then:
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: 0
+          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+          wake_hour: !lambda "return id(wake_time).hour;"
+          wake_minute: !lambda "return id(wake_time).minute;"
+      - script.wait: eval_sleep_duration
+      - lambda: id(sleep_pending) = true;
+      - lambda: id(dsleep).begin_sleep(false);
+
+  # 'deep_sleep.prevent/allow' does not reference count. So nested
+  # calls would enable sleep upon the first 'deep_sleep.allow'. So
+  # these ref count prevent/allow
+  - id: sleep_prevent
+    mode: queued
+    then:
+      - logger.log:
+          format: "Prevent count %d"
+          args: ['id(sleep_prevent_count)']
+      - if:
+          condition:
+            lambda: return id(sleep_prevent_count) == 0;
+          then:
+            - logger.log: "Prevent Sleep"
+            - deep_sleep.prevent: dsleep
+      - lambda: id(sleep_prevent_count) += 1;
+      
+  - id: sleep_allow
+    mode: queued
+    then:
+      - logger.log:
+          format: "Allow count %d"
+          args: ['id(sleep_prevent_count)']
+      - if:
+          condition:
+            lambda: return id(sleep_prevent_count) > 0;
+          then:
+            - lambda: id(sleep_prevent_count) -= 1;
+      - if:
+          condition:
+            lambda: return id(sleep_prevent_count) == 0;
+          then:
+            - if:
+                condition:
+                  lambda: return id(sleep_pending);
+                then:
+                  - script.execute:
+                      id: eval_sleep_duration
+                      run_duration: 0
+                      run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+                      wake_hour: !lambda "return id(wake_time).hour;"
+                      wake_minute: !lambda "return id(wake_time).minute;"
+                  - script.wait: eval_sleep_duration
+            - logger.log: "Allow Sleep"
+            - deep_sleep.allow: dsleep
+      
+button:
+  # Virtual button for HomeAssistant to request loading the image URL
+  - platform: template
+    name: "Refresh Display"
+    icon: "mdi:refresh"
+    on_press:
+      then:
+        # I would prefer to group this 'sleep_prevent' with it's matching 'sleep_allow'
+        # in the definition of 'current_image', but there is no 'on_download_start' trigger 
+        # to attach it to. There is only 'on_download_finished'.
+        - script.execute: sleep_prevent
+        - component.update: current_image
+
+  # Virtual button for HomeAssistant to request entry into deep sleep
+  - platform: template
+    name: "Sleep"
+    icon: "mdi:sleep"
+    on_press:
+      then:
+        - script.execute: do_sleep
+      
+light:
+  - platform: binary
+    name: "Onboard LED"
+    output: bsp_led
+    id: onboard_led
+
+  # Buzzer wrapped as a "light": brightness = volume
+  # 蜂鸣器包装成"灯"实体：亮度 = 音量
+  - platform: monochromatic
+    output: buzzer_pwm
+    name: "Buzzer"
+    id: buzzer
+    default_transition_length: 0s
+    initial_state: 
+      state: OFF
+      brightness: 50%
+
+datetime:
+  # Time to wake when 'wake_at' sleep type is used
+  - platform: template
+    id: wake_time
+    name: Wake At
+    type: time
+    optimistic: true
+    restore_value: true
+    initial_value: "3:00:00"
+    set_action: 
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: !lambda "return id(run_duration).state;"
+          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+          wake_hour: !lambda "return x.hour;"
+          wake_minute: !lambda "return x.minute;"
+
+select:
+  # 'wake_at' vs 'wake_every' sleep type options
+  - platform: template
+    id: wake_timer_type
+    name: Wake Timer Type
+    icon: "mdi:timer-sand"
+    optimistic: true
+    options: 
+      - Wake At
+      - Wake Every
+    initial_option: Wake Every
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            id(use_wake_every) = (i == 1);
+            ESP_LOGD("select", "index %d", i);
+        - script.execute:
+            id: eval_sleep_duration
+            run_duration: !lambda "return id(run_duration).state;"
+            run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+            wake_hour: !lambda "return id(wake_time).hour;"
+            wake_minute: !lambda "return id(wake_time).minute;"
+
+number:
+  # run/sleep cycle time when 'wake_every' sleep type is used
+  - platform: template
+    id: run_sleep_cycle
+    name: Wake Every
+    min_value: 0
+    max_value: 10080
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${initial_run_sleep_cycle}
+    icon: "mdi:timer-sand"
+    device_class: duration
+    unit_of_measurement: min
+    set_action: 
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: !lambda "return id(run_duration).state;"
+          run_sleep_cycle: !lambda "return x;"
+          wake_hour: !lambda "return id(wake_time).hour;"
+          wake_minute: !lambda "return id(wake_time).minute;"
+
+  # This is how long the device will remain awake if not
+  # explicitly put to sleed by the 'do_sleep' script
+  - platform: template
+    id: run_duration
+    name: Wake Duration
+    min_value: 1
+    max_value: 1440
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${initial_run_duration}
+    icon: "mdi:timer-sand"
+    device_class: duration
+    unit_of_measurement: min
+    set_action: 
+      - lambda: |-
+          ESP_LOGD("number", "run_duration %f", x);
+          id(dsleep).set_run_duration(x * 60 * 1000);
+          // I would really like to cancel the previous run timeout and
+          // start a fresh one here. But this is not currently possible
+          // with esphome :( So the updated run_duration will not take
+          // effect until the next cycle/reboot
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: !lambda "return x;"
+          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+          wake_hour: !lambda "return id(wake_time).hour;"
+          wake_minute: !lambda "return id(wake_time).minute;"
+
+switch:
+  # Sets landscape mode. Portrait mode is the default
+  - platform: template
+    name: "Landscape"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_state:
+      then:
+        - lambda: 'id(epaper_display).set_rotation(x ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);'
+
+event:
+  # Events sent to HomeAssistant to notify of various actions
+  - platform: template
+    name: Actions
+    icon: "mdi:run"
+    id: events
+    device_class: button
+    event_types:
+      - sleep_timeout
+      - wake_at_timeout
+      - refresh_button_press
+      - left_button_press
+      - right_button_press
+      - refresh_button_double_press
+      - left_button_double_press
+      - right_button_double_press
+    
+time:
+  # PCF8563 is at I2C address 0x51 with a CR1220 coin cell backup.
+  # On boot we read the RTC; when HA syncs, we write back to the RTC.
+  # PCF8563 在 I2C 地址 0x51，由 CR1220 纽扣电池备份。
+  # 启动时读取 RTC；当 HA 同步时间后，回写到 RTC。
+  #
+  # the wake-up time is off.
+  - platform: pcf8563
+    id: rtc_time
+    address: 0x51
+    # No periodic re-reads needed; HA sync handles it
+    # 无需定期重读；HA 同步来处理
+    update_interval: never
+
+  - platform: homeassistant
+    # When HA pushes a time sync, write it to the hardware RTC
+    # 当 HA 推送时间同步时，写入硬件 RTC
+    on_time_sync:
+      then:
+        - pcf8563.write_time:
+
+# Home Assistant native API / Home Assistant 原生 API
+api:
+  encryption: # Let HomeAssistant assign the key
+  on_client_connected:
+    # Send events and button presses that triggered a wake-up.
+    # Nothing is sent if we are simply reconnecting due to communication loss.
+    then:
+      # You would think we would be ready to send events
+      # when 'on_client_connected' triggers, but no.
+      # Documentation says we must delay a short time here before
+      # attempting to any communication.
+      - delay: 2s
+      - lambda: |-
+          ESP_LOGD("main", "api forward %d", id(wake_source));
+          switch (id(wake_source)) {
+            case 1:
+              id(events).trigger("sleep_timeout");
+              break;
+            case 3:
+              id(events).trigger("right_button_press");
+              break;
+            case 4:
+              id(events).trigger("left_button_press");
+              break;
+            case 5:
+              id(events).trigger("refresh_button_press");
+              break;
+            default:
+              break;
+          }
+      - if:
+          condition: 
+            lambda: "return (id(wake_source) == 1);"
+          then:
+            # The esp32 internal RTC wakes us early due to drift.
+            # Send a wake_at_timeout event when the wake_at time actually
+            # arrives.
+            - script.execute: wake_time_timer
+      - globals.set: 
+          id: wake_source
+          value: '0'
+
+# OTA (Over-The-Air) firmware update / 空中固件更新
+ota:
+  - platform: esphome
+    id: ota_esphome
+    # Prevent sleep while OTA is in progress
+    on_begin:
+      then:
+        - logger.log: "OTA Start"
+        - script.execute: sleep_prevent
+    on_progress:
+      then:
+        - logger.log: 
+            format: "Progress %01f%%"
+            args: ["x"]
+    on_end:
+      then:
+        - logger.log: "OTA Success"
+        - script.execute: sleep_allow
+    on_error:
+      then:
+        - logger.log: "OTA Fail"
+        - script.execute: sleep_allow
+
+# Wi-Fi settings / Wi-Fi 设置
+wifi:
+  ap:
+    ssid: PosterSeeed
+    password: ItsASecret2U!
+  on_connect:
+    then:
+      - delay: 5s
+      - ble.disable
+        
+network:
+  enable_ipv6: true
+
+captive_portal:
+
+esp32_improv:
+  authorizer: button_5
+
+improv_serial:
+  
+# =============================================================================
+# [1] ePaper display (13.3" 6-color, 1200x1600, T133A01)
+# Requires ESPHome >= 2026.7.0
+# =============================================================================
+text:
+  - platform: template
+    id: ImageURL
+    name: "Image URL"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    initial_value: "http://homeassistant.local:8123/local/Posters/Poster1.png"
+    restore_value: true
+    mode: text
+    icon: "mdi:image-album"
+    set_action:
+      - online_image.set_url:
+          id: current_image
+          update: false
+          url: !lambda return x;
+      - logger.log:
+          format: 'URL set: %s'
+          args: ["x.c_str()"]
+
+# This is required by the online_image component below
+http_request:
+
+image:
+  - platform: online_image
+    url: "http://homeassistant.local:8123/local/Posters/Poster1.png"
+    format: PNG
+    type: RGB565
+    id: current_image
+    # When the download is finished, update the diaplay and wait for
+    # the update to complete
+    on_download_finished:
+      - component.update: epaper_display
+      - wait_until: 
+          condition:
+            component.is_idle: epaper_display
+          timeout: 60s
+      # Add a short delay to be sure image update is complete.
+      - logger.log: "Display says it's done"
+      - delay: 1s
+      - script.execute: sleep_allow
+    on_error:
+      then:
+        - logger.log: "online_image download error"
+        - script.execute: sleep_allow
+
+display:
+  - platform: epaper_spi
+    id: epaper_display
+    spi_id: epaper_spi_bus
+    model: seeed-reterminal-e1004
+    update_interval: never
+    lambda: |-
+      ESP_LOGD("display", "=== ePaper display refresh ===");
+      it.fill(Color::WHITE);
+      it.image(0, 0, id(current_image));
+
+# =============================================================================
+# [9] Deep sleep
+# The device wakes, updates sensors and display, then sleeps.
+# Press any front GPIO4 button to wake manually at any time.
+# =============================================================================
+
+deep_sleep:
+  id: dsleep
+  # FYI: The E1004 does not have a 32khz crystal wired into the esp32 internal RTC,
+  # so the timers drift quite a lot.  10s of seconds per hour. There is an external
+  # PCF8563 that is accurate, but it is not used for deep sleep. The system time
+  # gets updated when we boot, but we likely woke early.
+  #
+  # Setting 'run_duration' here results in a non-cancelable run
+  # timeout being set very early in the boot sequence. This means
+  # it can not be reset to some other value.  So I do not set
+  # 'run_duration' here and instead initialize it in the 'on_boot' block.
+  #
+  # Default sleep duration 
+  # Is overridden by number 'sleep_duration' or datetime 'wake_time'
+  sleep_duration: ${initial_run_sleep_cycle - initial_run_duration}min
+  esp32_ext1_wakeup:
+    pins:
+      - pin:
+          number: GPIO3
+          allow_other_uses: true
+          mode: INPUT_PULLUP
+        on_wake:
+          - globals.set:
+              id: wake_source
+              value: '3'
+      - pin:
+          number: GPIO4
+          allow_other_uses: true
+          mode: INPUT_PULLUP
+        on_wake:
+          - globals.set:
+              id: wake_source
+              value: '4'
+      - pin:
+          number: GPIO5
+          allow_other_uses: true
+          mode: INPUT_PULLUP
+        on_wake:
+          - globals.set:
+              id: wake_source
+              value: '5'
+    mode: ANY_LOW
+  on_wake:
+    - if:
+        condition:
+          lambda: 'return cause != deep_sleep::WAKEUP_CAUSE_GPIO;'
+        then:
+          - globals.set:
+              id: wake_source
+              value: '1'
+            
+# secrets.yaml (create this file alongside your config):
+# wifi_ssid: "Your WiFi SSID"
+# wifi_password: "Your WiFi Password"
+# ota_password: "choose-a-strong-password"
+# api_encryption_key: "generate with: openssl rand -base64 32"
+

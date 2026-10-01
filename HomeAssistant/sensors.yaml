@@ -1,0 +1,13 @@
+- platform: rest
+  unique_id: image_list_info
+  name: Image List Info
+  icon: mdi:file-multiple
+  resource: http://homeassistant.local:8123/local/Posters/index.json
+  scan_interval: 3600
+  value_template: 'http://homeassistant.local:8123/local/Posters'
+  json_attributes_path: "$."
+  json_attributes:
+    - title
+    - description
+    - filelist
+    - sha256sum

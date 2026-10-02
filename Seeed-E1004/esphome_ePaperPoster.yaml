@@ -59,13 +59,17 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  - id: factory_reset_requested
+    type: bool
+    restore_value: false
+    initial_value: 'false'
     
 substitutions:
-  device_name: poster-seeed-e1004
+  device_name: poster-seeed
   friendly_name: "PosterSeeed"
   # Note: initial_run_sleep_cycle - initial_run_duration must be positive.
   # If you want to disable deep sleep, you will need to adjust the deep_sleep component
-  initial_run_duration: 2
+  initial_run_duration: 4
   initial_run_sleep_cycle: 10
 
 esphome:
@@ -145,17 +149,29 @@ esphome:
     version: dev
 
 esp32:
+  variant: esp32s3
   board: seeed_xiao_esp32s3
+  # The E1004 has 32MB of flash. But it's flash chip (ZB25Q256AYJG) is not supported
+  # in 4 byte addressing mode by esp-idf yet.
+  flash_size: 16MB
+  cpu_frequency: 240MHZ
+  # At the default 40Mhz psram speed, full screen image render exceeds
+  # the default task WDT of 5s. Extend the task WDT to 10s to
+  # prevent WDT reboot.
+  watchdog_timeout: 10s
   framework:
     type: esp-idf
+    version: latest
+    advanced: 
+      execute_from_psram: true
     sdkconfig_options:
       CONFIG_ESP_CONSOLE_UART_NUM: "0"
       CONFIG_ESP_CONSOLE_UART_TX_GPIO: "43"
       CONFIG_ESP_CONSOLE_UART_RX_GPIO: "44"
-      # At the default 40Mhz psram speed, full screen image render exceeds
-      # the default task WDT of 5s. Extend the task WDT to 10s to
-      # prevent WDT reboot.
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+
 
 # OPI PSRAM stores the 6-color display framebuffer.
 psram:
@@ -288,7 +304,7 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
       - delayed_off: 20ms
-    on_press:
+    on_click:
       then:
         - logger.log: "KEY3 (GPIO3) pressed"
         - event.trigger: 
@@ -303,10 +319,10 @@ binary_sensor:
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
-      - logger.log: "KEY3 (GPIO3) double pressed"
-      - event.trigger: 
-          id: events
-          event_type: right_button_double_press
+        - logger.log: "KEY3 (GPIO3) double pressed"
+        - event.trigger: 
+            id: events
+            event_type: right_button_double_press
 
   # KEY4 (GPIO4)
   - platform: gpio
@@ -321,7 +337,7 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
       - delayed_off: 20ms
-    on_press:
+    on_click:
       then:
         - logger.log: "KEY4 (GPIO4) pressed"
         - event.trigger: 
@@ -336,10 +352,10 @@ binary_sensor:
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
-      - logger.log: "KEY4 (GPIO4) double pressed"
-      - event.trigger: 
-          id: events
-          event_type: left_button_double_press
+        - logger.log: "KEY4 (GPIO4) double pressed"
+        - event.trigger: 
+            id: events
+            event_type: left_button_double_press
 
   # KEY5 (GPIO5)
   - platform: gpio
@@ -354,7 +370,7 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
       - delayed_off: 20ms
-    on_press:
+    on_click:
       then:
         - logger.log: "KEY5 (GPIO5) pressed"
         - event.trigger: 
@@ -369,11 +385,44 @@ binary_sensor:
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
-      - logger.log: "KEY5 (GPIO5) double pressed"
-      - event.trigger: 
-          id: events
-          event_type: refresh_button_double_press
-
+        - logger.log: "KEY5 (GPIO5) double pressed"
+        - event.trigger: 
+            id: events
+            event_type: refresh_button_double_press
+    on_release:
+      then:
+        - if: 
+            condition:
+              lambda: return id(factory_reset_requested);
+            then:
+              - button.press: factory_reset_button
+    on_multi_click:
+      - timing:
+          - ON for at least 10s
+        then:
+          # Double chirp warning that factory reset is aproaching
+          - light.turn_on:
+              id: buzzer
+              brightness: 50%
+          - delay: 150ms
+          - light.turn_off: buzzer
+          - delay: 250ms
+          - light.turn_on:
+              id: buzzer
+              brightness: 50%
+          - delay: 150ms
+          - light.turn_off: buzzer
+      - timing:
+          - ON for at least 20s
+        then:
+          # Long Buzz to notify that factory reset is initiated
+          - light.turn_on:
+              id: buzzer
+              brightness: 50%
+          - delay: 500ms
+          - light.turn_off: buzzer
+          - lambda: id(factory_reset_requested) = true;
+          
   # [9] SD card detect (LOW = card present)
   # SD 卡检测（低电平 = 卡已插入）
   #
@@ -631,7 +680,19 @@ button:
     on_press:
       then:
         - script.execute: do_sleep
-      
+
+  - platform: factory_reset
+    id: factory_reset_button
+    name: "Factory Reset"
+    entity_category: diagnostic
+    internal: true
+
+  - platform: restart
+    name: "Restart"
+    entity_category: config
+    disabled_by_default: true
+    icon: "mdi:restart"
+    
 light:
   - platform: binary
     name: "Onboard LED"
@@ -873,6 +934,7 @@ captive_portal:
 
 esp32_ble:
   use_psram: true
+  name: posterseeed
 
 esp32_improv:
   authorizer: button_5
@@ -949,7 +1011,7 @@ display:
 deep_sleep:
   id: dsleep
   # FYI: The E1004 does not have a 32khz crystal wired into the esp32 internal RTC,
-  # so the timers drift quite a lot.  10s of seconds per hour. There is an external
+  # so the timers drift quite a lot.  Minutes per hour. There is an external
   # PCF8563 that is accurate, but it is not used for deep sleep. The system time
   # gets updated when we boot, but we likely woke early.
   #
@@ -997,4 +1059,3 @@ deep_sleep:
               id: wake_source
               value: '1'
             
-

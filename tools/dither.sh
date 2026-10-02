@@ -161,7 +161,7 @@ for input in "$@"; do
 
     # HomeAssistant entity attributes have a size limit of 16384 bytes.
     # So shorten the file names to try to stay under this limit.
-    oname="$(echo "${iname}" | sed 's/\.\(jpg\|gif\|bmp\|tif\)$/\.png/')"
+    oname="$(echo "${iname}" | sed 's/\.\(png\|jpg\|gif\|bmp\|tif\)$/\.png/I')"
 
     output="${dither_dir}/${oname}"
 

@@ -129,7 +129,7 @@ actions:
               event_type:
               - refresh_button_press
             variables:
-              next_prev: 0
+              next_prev: 1
           - trigger: switch.turned_off
             target:
               entity_id: !input slideshow_start
@@ -151,7 +151,7 @@ actions:
             sequence:
               - variables:
                   advance_schedule: true
-                button_press: false
+                  button_press: false
                   next_prev: 1
           - conditions: '{{ wait.trigger.id == "right_button_press" }}'
             sequence:
@@ -170,7 +170,7 @@ actions:
               - variables:
                   advance_schedule: true
                   button_press: true
-                  next_prev: 0
+                  next_prev: 1
           default:
             - variables:
                 advance_schedule: false

@@ -1,0 +1,43 @@
+packages:
+  esphome_ePaperPoster: !include esphome_ePaperPoster.yaml
+
+esphome:
+  name_add_mac_suffix: true
+  # Set an identifiable Manufacturer.Model that can be used in blueprints
+  # to limit device options to devices that support the features implemented here.
+  project:
+    name: Stebbins.ePaperDisplay
+    version: dev
+
+ota:
+  - platform: http_request
+    id: ota_http_request
+    # Prevent sleep while OTA is in progress
+    on_begin:
+      then:
+        - logger.log: "OTA Start"
+        - script.execute: sleep_prevent
+    on_progress:
+      then:
+        - logger.log: 
+            format: "Progress %01f%%"
+            args: ["x"]
+    on_end:
+      then:
+        - logger.log: "OTA Success"
+        - script.execute: sleep_allow
+    on_error:
+      then:
+        - logger.log: "OTA Fail"
+        - script.execute: sleep_allow
+
+http_request:
+
+update:
+  - platform: http_request
+    name: None
+    id: update_http_request
+    source: https://ha-ldr.tail07098.ts.net/local/firmware/e1004/manifest.json
+
+dashboard_import:
+  package_import_url: github://jstebbins/esphome-Spectra6-ePaper/Seeed-E1004/esphome_ePaperPoster.yaml

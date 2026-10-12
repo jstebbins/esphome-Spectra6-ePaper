@@ -65,6 +65,9 @@ globals:
     initial_value: 'false'
     
 substitutions:
+  # If you take control of this device and you have multiple instances
+  # of the device, you will require unique device names if you want to
+  # update them over wifi
   device_name: poster-seeed
   friendly_name: "PosterSeeed"
   # Note: initial_run_sleep_cycle - initial_run_duration must be positive.
@@ -74,8 +77,12 @@ substitutions:
 
 esphome:
   name: ${device_name}
-  name_add_mac_suffix: true
   friendly_name: ${friendly_name}
+  # Set an identifiable Manufacturer.Model that can be used in blueprints
+  # to limit device options to devices that support the features implemented here.
+  project:
+    name: Stebbins.ePaperDisplay
+    version: dev
   on_boot:
     priority: -100
     then:
@@ -142,12 +149,6 @@ esphome:
             ESP_LOGD("boot", "SSID %s", ssid.c_str());
           }
 
-  # Set an identifiable Manufacturer.Model that can be used in blueprints
-  # to limit device options to devices that support the features implemented here.
-  project:
-    name: Stebbins.ePaperDisplay
-    version: dev
-
 esp32:
   variant: esp32s3
   board: seeed_xiao_esp32s3
@@ -172,7 +173,6 @@ esp32:
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
 
-
 # OPI PSRAM stores the 6-color display framebuffer.
 psram:
   mode: octal
@@ -186,6 +186,21 @@ psram:
   speed: 80MHZ
   ignore_not_found: false
 
+# Wi-Fi settings / Wi-Fi 设置
+wifi:
+  id: my_wifi
+  use_psram: true
+  ap:
+    ssid: PosterSeeed
+    password: ItsASecret2U!
+  on_connect:
+    then:
+      - delay: 5s
+      - ble.disable
+        
+network:
+  enable_ipv6: true
+
 # Enable serial logging / 启用串口日志
 # The reTerminal E series has a CH340K USB-to-UART bridge on UART0.
 # Default ESP32-S3 logger uses USB_CDC — won't produce output on the physical port.
@@ -193,6 +208,82 @@ psram:
 logger:
   hardware_uart: UART0
 
+# Home Assistant native API / Home Assistant 原生 API
+api:
+  encryption: # Let HomeAssistant assign the key
+  on_client_connected:
+    # Send events and button presses that triggered a wake-up.
+    # Nothing is sent if we are simply reconnecting due to communication loss.
+    then:
+      # You would think we would be ready to send events
+      # when 'on_client_connected' triggers, but no.
+      # Documentation says we must delay a short time here before
+      # attempting to any communication.
+      - delay: 2s
+      - lambda: |-
+          ESP_LOGD("main", "api forward %d", id(wake_source));
+          switch (id(wake_source)) {
+            case 1:
+              id(events).trigger("sleep_timeout");
+              break;
+            case 3:
+              id(events).trigger("right_button_press");
+              break;
+            case 4:
+              id(events).trigger("left_button_press");
+              break;
+            case 5:
+              id(events).trigger("refresh_button_press");
+              break;
+            default:
+              break;
+          }
+      - if:
+          condition: 
+            lambda: "return (id(wake_source) == 1);"
+          then:
+            # The esp32 internal RTC wakes us early due to drift.
+            # Send a wake_at_timeout event when the wake_at time actually
+            # arrives.
+            - script.execute: wake_time_timer
+      - globals.set: 
+          id: wake_source
+          value: '0'
+
+# OTA (Over-The-Air) firmware update / 空中固件更新
+ota:
+  - platform: esphome
+    id: ota_esphome
+    # Prevent sleep while OTA is in progress
+    on_begin:
+      then:
+        - logger.log: "OTA Start"
+        - script.execute: sleep_prevent
+    on_progress:
+      then:
+        - logger.log: 
+            format: "Progress %01f%%"
+            args: ["x"]
+    on_end:
+      then:
+        - logger.log: "OTA Success"
+        - script.execute: sleep_allow
+    on_error:
+      then:
+        - logger.log: "OTA Fail"
+        - script.execute: sleep_allow
+
+captive_portal:
+
+esp32_ble:
+  use_psram: true
+  name: posterseeed
+
+esp32_improv:
+  authorizer: button_5
+
+improv_serial:
+  
 # SPI — shared by ePaper display and SD card
 # SPI — 墨水屏和 SD 卡共用
 spi:
@@ -850,97 +941,6 @@ time:
       then:
         - pcf8563.write_time:
 
-# Home Assistant native API / Home Assistant 原生 API
-api:
-  encryption: # Let HomeAssistant assign the key
-  on_client_connected:
-    # Send events and button presses that triggered a wake-up.
-    # Nothing is sent if we are simply reconnecting due to communication loss.
-    then:
-      # You would think we would be ready to send events
-      # when 'on_client_connected' triggers, but no.
-      # Documentation says we must delay a short time here before
-      # attempting to any communication.
-      - delay: 2s
-      - lambda: |-
-          ESP_LOGD("main", "api forward %d", id(wake_source));
-          switch (id(wake_source)) {
-            case 1:
-              id(events).trigger("sleep_timeout");
-              break;
-            case 3:
-              id(events).trigger("right_button_press");
-              break;
-            case 4:
-              id(events).trigger("left_button_press");
-              break;
-            case 5:
-              id(events).trigger("refresh_button_press");
-              break;
-            default:
-              break;
-          }
-      - if:
-          condition: 
-            lambda: "return (id(wake_source) == 1);"
-          then:
-            # The esp32 internal RTC wakes us early due to drift.
-            # Send a wake_at_timeout event when the wake_at time actually
-            # arrives.
-            - script.execute: wake_time_timer
-      - globals.set: 
-          id: wake_source
-          value: '0'
-
-# OTA (Over-The-Air) firmware update / 空中固件更新
-ota:
-  - platform: esphome
-    id: ota_esphome
-    # Prevent sleep while OTA is in progress
-    on_begin:
-      then:
-        - logger.log: "OTA Start"
-        - script.execute: sleep_prevent
-    on_progress:
-      then:
-        - logger.log: 
-            format: "Progress %01f%%"
-            args: ["x"]
-    on_end:
-      then:
-        - logger.log: "OTA Success"
-        - script.execute: sleep_allow
-    on_error:
-      then:
-        - logger.log: "OTA Fail"
-        - script.execute: sleep_allow
-
-# Wi-Fi settings / Wi-Fi 设置
-wifi:
-  id: my_wifi
-  use_psram: true
-  ap:
-    ssid: PosterSeeed
-    password: ItsASecret2U!
-  on_connect:
-    then:
-      - delay: 5s
-      - ble.disable
-        
-network:
-  enable_ipv6: true
-
-captive_portal:
-
-esp32_ble:
-  use_psram: true
-  name: posterseeed
-
-esp32_improv:
-  authorizer: button_5
-
-improv_serial:
-  
 # =============================================================================
 # [1] ePaper display (13.3" 6-color, 1200x1600, T133A01)
 # Requires ESPHome >= 2026.7.0

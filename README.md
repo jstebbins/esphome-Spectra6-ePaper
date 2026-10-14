@@ -15,3 +15,9 @@
 # 3D-Print
 
 - A wall hanging bracket
+
+# Tools
+
+- dither.sh scales, beautifies borders, dithers, and remaps colors for best image quality on T133A01 display.
+- make_json_index.sh creates a json index of images used by HomeAssistant REST sensor.
+- make_html_index.sh creates an html index of images. Useful for preview of images in a browser.

@@ -3,10 +3,7 @@ packages:
 
 esphome:
   name_add_mac_suffix: true
-  # Set an identifiable Manufacturer.Model that can be used in blueprints
-  # to limit device options to devices that support the features implemented here.
   project:
-    name: Stebbins.ePaperDisplay
     version: dev
 
 ota:

@@ -83,6 +83,9 @@ esphome:
   project:
     name: Stebbins.ePaperDisplay
     version: dev
+  includes:
+    - setup_image.h
+    - setup_complete_image.h
   on_boot:
     priority: -100
     then:
@@ -130,6 +133,8 @@ esphome:
                 brightness: 50%
             - delay: 250ms
             - light.turn_off: buzzer
+      # Configure the Display Component to show our online images
+      - display.page.show: remote_image
       # The text component ImageURL gets restored upon reboot,
       # but the online_image current_image.url does not. 
       # Copy ImageURL to current_image.url
@@ -281,6 +286,19 @@ esp32_ble:
 
 esp32_improv:
   authorizer: button_5
+  on_start:
+    then:
+      - logger.log: "Improv waiting for authorization"
+      - display.page.show: improv_setup
+      - component.update: epaper_display
+  on_provisioned:
+    then:
+      - logger.log: "Improv provisioned"
+      - display.page.show: improv_setup_complete
+      - component.update: epaper_display
+  on_stop:
+    then:
+      - logger.log: "Improv stopped"
 
 improv_serial:
   
@@ -896,6 +914,7 @@ number:
 switch:
   # Sets landscape mode. Portrait mode is the default
   - platform: template
+    id: landscape_mode
     name: "Landscape"
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
@@ -977,6 +996,7 @@ image:
     # When the download is finished, update the diaplay and wait for
     # the update to complete
     on_download_finished:
+      - display.page.show: remote_image
       - component.update: epaper_display
       - wait_until: 
           condition:
@@ -990,6 +1010,11 @@ image:
       then:
         - logger.log: "online_image download error"
         - script.execute: sleep_allow
+# It's really too bad there is not a compressed image 'file' format.
+# E.g. a compressed image in flash that is decoded when needed.
+# All the necessary components exist and it's not too hard to implement.
+# So I bundled up the images in a couple header files and implemented myself.
+# See code in 'improv_setup' display page lambda below...
 
 display:
   - platform: epaper_spi
@@ -997,10 +1022,59 @@ display:
     spi_id: epaper_spi_bus
     model: seeed-reterminal-e1004
     update_interval: never
-    lambda: |-
-      ESP_LOGD("display", "=== ePaper display refresh ===");
-      it.fill(Color::WHITE);
-      it.image(0, 0, id(current_image));
+    pages:
+      - id: remote_image
+        lambda: |-
+          ESP_LOGD("display", "=== ePaper Online Image Page refresh ===");
+          id(epaper_display).set_rotation(id(landscape_mode).state ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);
+          it.image(0, 0, id(current_image));
+      - id: improv_setup
+        lambda: |-
+          ESP_LOGD("display", "=== ePaper Setup Page refresh ===");
+          id(epaper_display).set_rotation(DISPLAY_ROTATION_90_DEGREES);
+          esphome::runtime_image::RuntimeImage img(esphome::runtime_image::ImageFormat::PNG, 
+            esphome::image::IMAGE_TYPE_RGB565, esphome::image::TRANSPARENCY_OPAQUE);
+
+          int img_size = sizeof(setup_png);
+          int offset = 0;
+
+          img.begin_decode(img_size, esphome::runtime_image::ImageFormat::PNG);
+          while (!img.is_decode_finished() && offset < img_size) {
+            auto consumed = img.feed_data((uint8_t*)&setup_png[offset], img_size - offset);
+            if (consumed < 0) {
+              ESP_LOGD("display", "Error decoding image");
+              break;
+            }
+            offset += consumed;
+          }
+
+          img.end_decode();
+          it.image(0, 0, &img);
+          img.release();
+
+      - id: improv_setup_complete
+        lambda: |-
+          ESP_LOGD("display", "=== ePaper Setup Complete Page refresh ===");
+          id(epaper_display).set_rotation(DISPLAY_ROTATION_90_DEGREES);
+          esphome::runtime_image::RuntimeImage img(esphome::runtime_image::ImageFormat::PNG, 
+            esphome::image::IMAGE_TYPE_RGB565, esphome::image::TRANSPARENCY_OPAQUE);
+
+          int img_size = sizeof(setup_complete_png);
+          int offset = 0;
+
+          img.begin_decode(img_size, esphome::runtime_image::ImageFormat::PNG);
+          while (!img.is_decode_finished() && offset < img_size) {
+            auto consumed = img.feed_data((uint8_t*)&setup_complete_png[offset], img_size - offset);
+            if (consumed < 0) {
+              ESP_LOGD("display", "Error decoding image");
+              break;
+            }
+            offset += consumed;
+          }
+
+          img.end_decode();
+          it.image(0, 0, &img);
+          img.release();
 
 # =============================================================================
 # [9] Deep sleep

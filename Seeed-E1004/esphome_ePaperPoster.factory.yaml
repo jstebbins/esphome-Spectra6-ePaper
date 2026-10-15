@@ -48,6 +48,7 @@ text:
   - platform: template
     id: updates_url
     entity_category: config
+    disabled_by_default: true
     name: "Update Manifest URL"
     optimistic: true
     min_length: 0

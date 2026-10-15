@@ -63,6 +63,10 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: improv_setup_page_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
     
 substitutions:
   # If you take control of this device and you have multiple instances
@@ -145,14 +149,21 @@ esphome:
       - logger.log:
           format: 'Init Image URL: %s'
           args: ['id(ImageURL).state.c_str()']
-      - lambda: |-
-          esphome::wifi::WiFiAP sta = id(my_wifi).get_sta();
-          StringRef ssid = sta.get_ssid();
-          if (ssid.empty()) {
-            ESP_LOGD("boot", "No SSID");
-          } else {
-            ESP_LOGD("boot", "SSID %s", ssid.c_str());
-          }
+      - if:
+          condition:
+            lambda: |-
+              esphome::wifi::WiFiAP sta = id(my_wifi).get_sta();
+              StringRef ssid = sta.get_ssid();
+              if (ssid.empty()) {
+                ESP_LOGD("boot", "No SSID");
+                return true;
+              }
+              ESP_LOGD("boot", "SSID %s", ssid.c_str());
+              return false;
+          then:
+            - logger.log: "Improv waiting for activation"
+            - script.execute: show_improv_setup
+      - script.execute: improv_setup_timer
 
 esp32:
   variant: esp32s3
@@ -215,11 +226,14 @@ logger:
 
 # Home Assistant native API / Home Assistant 原生 API
 api:
+  id: my_api
   encryption: # Let HomeAssistant assign the key
   on_client_connected:
     # Send events and button presses that triggered a wake-up.
     # Nothing is sent if we are simply reconnecting due to communication loss.
     then:
+      # Cancel the improv_setup_timer
+      - script.execute: improv_setup_timer
       # You would think we would be ready to send events
       # when 'on_client_connected' triggers, but no.
       # Documentation says we must delay a short time here before
@@ -289,16 +303,16 @@ esp32_improv:
   on_start:
     then:
       - logger.log: "Improv waiting for authorization"
-      - display.page.show: improv_setup
-      - component.update: epaper_display
+      - script.execute: sleep_prevent
   on_provisioned:
     then:
       - logger.log: "Improv provisioned"
-      - display.page.show: improv_setup_complete
-      - component.update: epaper_display
+      - script.execute: show_improv_setup_complete
+      - script.execute: sleep_allow
   on_stop:
     then:
       - logger.log: "Improv stopped"
+      - script.execute: sleep_allow
 
 improv_serial:
   
@@ -560,6 +574,47 @@ binary_sensor:
     name: "SD Card Detected"
 
 script:
+  # Show user instructions for connecting the device to HomeAssistant
+  - id: show_improv_setup
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(improv_setup_page_active);'
+          then:
+            - globals.set: 
+                id: improv_setup_page_active
+                value: 'true'
+            - display.page.show: improv_setup
+            - component.update: epaper_display
+
+  # Show an image indicating setup is complete
+  - id: show_improv_setup_complete
+    mode: single
+    then:
+      - globals.set: 
+          id: improv_setup_page_active
+          value: 'false'
+      - display.page.show: improv_setup_complete
+      - component.update: epaper_display
+
+  # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
+  # after 1 minute, show the Improv setup page. This timer can be canceled by
+  # running the script again when connected.
+  - id: improv_setup_timer
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(my_wifi).is_connected() || !id(my_api).is_connected();'
+          then:
+            - delay: 60s
+            - if:
+                condition:
+                  lambda: 'return !id(my_wifi).is_connected() || !id(my_api).is_connected();'
+                then:
+                  script.execute: show_improv_setup
+
   # The esp32 internal RTC doesn't have a crystal and drifts, causing the time that we wake to
   # be inaccurate - early in every case I've seen. This script will wait for the requested 
   # wake time and then fire an event to notify that the actual requested time has arrived.

@@ -5,6 +5,11 @@ esphome:
   name_add_mac_suffix: true
   project:
     version: dev
+  on_boot:
+    priority: -99
+    then:
+      - lambda: |-
+          id(update_http_request).set_source_url(id(updates_url).state);
 
 ota:
   - platform: http_request
@@ -34,7 +39,26 @@ update:
   - platform: http_request
     name: None
     id: update_http_request
-    source: http://ha-ldr.local:8123/local/firmware/e1004/manifest.json
+    source: "http://homeassistant.local:8123/local/firmware/e1004/manifest.json"
 
 dashboard_import:
   package_import_url: github://jstebbins/esphome-Spectra6-ePaper/Seeed-E1004/esphome_ePaperPoster.yaml
+
+text:
+  - platform: template
+    id: updates_url
+    entity_category: config
+    name: "Update Manifest URL"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    initial_value: "http://homeassistant.local:8123/local/firmware/e1004/manifest.json"
+    restore_value: true
+    mode: text
+    icon: "mdi:update"
+    set_action:
+      - lambda: |-
+          id(update_http_request).set_source_url(x);
+      - logger.log:
+          format: 'Manifest URL set: %s'
+          args: ["x.c_str()"]

@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-import hashlib, json, sys, os
+import hashlib, json, sys, os, yaml
 
 base_firmware_name = "poster-seeed-e1004-firmware"
 base_release_url = "https://github.com/jstebbins/esphome-Spectra6-ePaper/releases/tag/"
@@ -15,6 +15,12 @@ def hash_it(m, fn):
             m.update(chunk)
             chunk = f.read(8192)
     return m.hexdigest()
+
+# constructor to parse non-standard '!include' yaml
+# this does not pull in the included file, just the file's name
+def constructor_include(loader, node):
+    path = loader.construct_scalar(node)
+    return path
 
 class Manifest:
 
@@ -45,7 +51,16 @@ class Manifest:
       ]
     }
 
-    def __init__(self, version):
+    def __init__(self, factory_yaml):
+        # Read the release version number from the provided yaml file
+        yaml.add_constructor('!include', constructor_include, Loader=yaml.SafeLoader)
+        with open(factory_yaml, "r") as f:
+            try:
+                fy = yaml.safe_load(f)
+            except yaml.YAMLError as exc:
+                print("Error in configuration file: %s", exc)
+
+            version = fy["esphome"]["project"]["version"]
         ota = self.manifest["builds"][0]["ota"]
         part = self.manifest["builds"][0]["parts"][0]
 

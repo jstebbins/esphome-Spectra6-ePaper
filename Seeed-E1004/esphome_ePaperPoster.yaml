@@ -297,6 +297,7 @@ captive_portal:
 esp32_ble:
   use_psram: true
   name: posterseeed
+  enable_on_boot: false
 
 esp32_improv:
   authorizer: button_5
@@ -308,7 +309,6 @@ esp32_improv:
     then:
       - logger.log: "Improv provisioned"
       - script.execute: show_improv_setup_complete
-      - script.execute: sleep_allow
   on_stop:
     then:
       - logger.log: "Improv stopped"

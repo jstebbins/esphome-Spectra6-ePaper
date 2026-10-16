@@ -1,12 +1,25 @@
 #! /usr/bin/env python
 
+# Parses version number from a project yaml file
+# produces md5 and sha256 hashes from compiled bin files which must be in CWD
+# bin file names are hard-coded (see base_firmware_name)
+# release_url is hard-coded (see base_release_url)
+#
+# Procedure:
+#   1. Update version number in the yaml
+#   2. esphome compile <yaml file>
+#   3. cp .esphome/build/poster-seeed/build/firmware.factory.bin poster-seeed-e1004-firmware.factory.bin
+#   4. cp .esphome/build/poster-seeed/build/firmware.ota.bin poster-seeed-e1004-firmware.ota.bin
+#   5. ./create_manifest <yaml file>
+#   6. Post bin files and manifest.json to your firmware updates location
+
 import hashlib, json, sys, os, yaml
 
 base_firmware_name = "poster-seeed-e1004-firmware"
 base_release_url = "https://github.com/jstebbins/esphome-Spectra6-ePaper/releases/tag/"
 
 def usage(cmd):
-    print("usage: %s <version string>" % os.path.basename(cmd))
+    print("usage: %s <yaml_file>" % os.path.basename(cmd))
 
 def hash_it(m, fn):
     with open(fn, "rb") as f:

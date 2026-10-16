@@ -446,6 +446,9 @@ binary_sensor:
         - event.trigger: 
             id: events
             event_type: right_button_double_press
+    on_release:
+      then:
+        - script.execute: activity_sleep_prevent
 
   # KEY4 (GPIO4)
   - platform: gpio
@@ -479,6 +482,9 @@ binary_sensor:
         - event.trigger: 
             id: events
             event_type: left_button_double_press
+    on_release:
+      then:
+        - script.execute: activity_sleep_prevent
 
   # KEY5 (GPIO5)
   - platform: gpio
@@ -514,6 +520,7 @@ binary_sensor:
             event_type: refresh_button_double_press
     on_release:
       then:
+        - script.execute: activity_sleep_prevent
         - if: 
             condition:
               lambda: return id(factory_reset_requested);
@@ -574,6 +581,15 @@ binary_sensor:
     name: "SD Card Detected"
 
 script:
+  # Prevent sleep for a specified period of time when there is user activity
+  # I.e. button presses
+  - id: activity_sleep_prevent
+    mode: parallel
+    then:
+      - script.execute: sleep_prevent
+      - delay: !lambda "return id(activity_sleep_block_time).state * 60 * 1000;"
+      - script.execute: sleep_allow
+
   # Show user instructions for connecting the device to HomeAssistant
   - id: show_improv_setup
     mode: single
@@ -936,6 +952,19 @@ number:
           run_sleep_cycle: !lambda "return x;"
           wake_hour: !lambda "return id(wake_time).hour;"
           wake_minute: !lambda "return id(wake_time).minute;"
+  # How long to block sleep when there us user activity
+  - platform: template
+    id: activity_sleep_block_time
+    name: Activity Timeout
+    min_value: 0
+    max_value: 60
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 2
+    icon: "mdi:timer-sand"
+    device_class: duration
+    unit_of_measurement: min
 
   # This is how long the device will remain awake if not
   # explicitly put to sleed by the 'do_sleep' script

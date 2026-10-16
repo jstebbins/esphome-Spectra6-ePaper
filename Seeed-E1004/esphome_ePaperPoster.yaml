@@ -940,6 +940,7 @@ number:
   - platform: template
     id: run_sleep_cycle
     name: Wake Every
+    mode: box
     min_value: 0
     max_value: 10080
     step: 1
@@ -960,6 +961,7 @@ number:
   - platform: template
     id: activity_sleep_block_time
     name: Activity Timeout
+    mode: box
     min_value: 0
     max_value: 60
     step: 1

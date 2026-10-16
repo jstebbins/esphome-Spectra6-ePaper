@@ -583,6 +583,10 @@ binary_sensor:
 script:
   # Prevent sleep for a specified period of time when there is user activity
   # I.e. button presses
+  #
+  # What I really would prefer doing is extend the run time of the current
+  # sleep/wake cycle.  But esphome does not have any method to update the
+  # timer used for the current run period.  So this is my next best option.
   - id: activity_sleep_prevent
     mode: parallel
     then:

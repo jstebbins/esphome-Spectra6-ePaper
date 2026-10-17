@@ -605,6 +605,7 @@ script:
             - globals.set: 
                 id: improv_setup_page_active
                 value: 'true'
+            - ble.enable
             - display.page.show: improv_setup
             - component.update: epaper_display
 

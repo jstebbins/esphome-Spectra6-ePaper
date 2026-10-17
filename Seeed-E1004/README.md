@@ -98,12 +98,12 @@ To host your own factory updates, you will require an http(s) server. HomeAssist
 The files you need to host are `manifest.json`, `poster-seeed-e1004-firmware.factory.bin`, and `poster-seeed-e1004-firmware.ota.bin`. The layout must be, e.g.
 ```
 www/
-	firmware/
-		e1004/
-			manifest.json
-			26.10.17.0/
-				poster-seeed-e1004-firmware.factory.bin
-				poster-seeed-e1004-firmware.ota.bin
+    firmware/
+        e1004/
+            manifest.json
+            26.10.17.0/
+                poster-seeed-e1004-firmware.factory.bin
+                poster-seeed-e1004-firmware.ota.bin
 ```
 Where `26.10.17.0` is the version number that must be set in `esphome_ePaperPoster.factory.yaml` prior to building the firmware.
 

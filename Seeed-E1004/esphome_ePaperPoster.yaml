@@ -605,6 +605,14 @@ script:
             - globals.set: 
                 id: improv_setup_page_active
                 value: 'true'
+            # Improv will not automatically enable BLE when
+            # needed (unfortunate). It would really be nice
+            # if improv had an 'on_activation_required' automation
+            # that could be used to kick everything off with. Instead
+            # I must check if the SSID has been set or we've failed
+            # to connect to WiFi for some period of time manually,
+            # which duplicates what Improv already does when ble is
+            # enabled on boot.
             - ble.enable
             - display.page.show: improv_setup
             - component.update: epaper_display

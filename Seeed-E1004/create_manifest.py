@@ -13,7 +13,7 @@
 #   5. ./create_manifest <yaml file>
 #   6. Post bin files and manifest.json to your firmware updates location
 
-import hashlib, json, sys, os, yaml
+import hashlib, json, sys, os, yaml, shutil, os
 
 base_firmware_name = "poster-seeed-e1004-firmware"
 base_release_url = "https://github.com/jstebbins/esphome-Spectra6-ePaper/releases/tag/"
@@ -95,6 +95,12 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         usage(sys.argv[0])
         exit(2)
+    # Copy the bin files we require
+    os.system("cp %s %s" % ( ".esphome/build/poster-seeed/build/firmware.factory.bin", base_firmware_name + ".factory.bin"))
+    os.system("cp %s %s" % ( ".esphome/build/poster-seeed/build/firmware.ota.bin", base_firmware_name + ".ota.bin"))
+    # shutil.copyfile appears to be really slow in some cases.
+    #shutil.copyfile(".esphome/build/poster-seeed/build/firmware.factory.bin", base_firmware_name + ".factory.bin")
+    #shutil.copyfile(".esphome/build/poster-seeed/build/firmware.ota.bin", base_firmware_name + ".ota.bin")
     manifest = Manifest(sys.argv[1])
     manifest.print()
 

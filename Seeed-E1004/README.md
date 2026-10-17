@@ -107,7 +107,7 @@ www/
 ```
 Where `26.10.17.0` is the version number that must be set in `esphome_ePaperPoster.factory.yaml` prior to building the firmware.
 
-`manifest.json` is created with the script `create_manifest.py`. This script reads the version number from `esphome_ePaperPoster.factory.yaml` and fills out the manifest for you. It send output to stdout, so usage looks like
+`manifest.json` is created with the script `create_manifest.py`. This script reads the version number from `esphome_ePaperPoster.factory.yaml` and fills out the manifest for you. It sends output to stdout, so usage looks like
 ```
 ./create_manifest.py esphome_ePaperPoster.factory.yaml > manifest.json
 ```
@@ -117,16 +117,11 @@ To get this set up:
 ```
 esphome run --device /dev/ttyUSB0 esphome_ePaperPoster.factory.yaml
 ```
-2. Copy the bin files from where they were built to the current working directory (create_manifest.py needs them)
-```
-cp .esphome/build/poster-seeed/build/firmware.factory.bin poster-seeed-e1004-firmware.factory.bin
-cp .esphome/build/poster-seeed/build/firmware.ota.bin poster-seeed-e1004-firmware.ota.bin
-```
-3. Create manifest.json
+2. Create manifest.json. As a side effect, `create_manifest.py` copies the firmware files to the currnet working directory.
 ```
 ./create_manifest.py esphome_ePaperPoster.factory.yaml > manifest.json
 ```
-4. Copy these files to the locations described above on your http server.
+3. Copy the required OTA update files to the locations described above on your http server.
 ```
 scp poster-seeed-e1004-firmware.* root@homeassistant.local:config/www/firmware/e1004/26.10.17.0
 scp manifest.json root@homeassistant.local:config/www/firmware/e1004
@@ -143,6 +138,6 @@ http://homeassistant.local:8123/local/firmware/e1004/manifest.json
 ```
 esphome compile esphome_ePaperPoster.factory.yaml
 ```
-and do steps 2 - 4. Be sure to increment your version number.
+and do steps 2 - 3. Be sure to increment your version number.
 
 The next time the device checks for updates, it should find a new update available.

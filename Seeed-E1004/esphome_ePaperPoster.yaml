@@ -165,9 +165,9 @@ esphome:
 esp32:
   variant: esp32s3
   board: seeed_xiao_esp32s3
-  # The E1004 has 32MB of flash. But it's flash chip (ZB25Q256AYJG) is not supported
-  # in 4 byte addressing mode by esp-idf yet.
-  flash_size: 16MB
+  # The E1004 has 32MB of flash. But it's flash chip (ZB25Q256AYJG) is not listed as supported
+  # in 4 byte addressing mode by esp-idf yet. However, this seems to work...
+  flash_size: 32MB
   cpu_frequency: 240MHZ
   # At the default 40Mhz psram speed, full screen image render exceeds
   # the default task WDT of 5s. Extend the task WDT to 10s to
@@ -178,6 +178,7 @@ esp32:
     version: latest
     advanced: 
       execute_from_psram: true
+      enable_idf_experimental_features: true
     sdkconfig_options:
       CONFIG_ESP_CONSOLE_UART_NUM: "0"
       CONFIG_ESP_CONSOLE_UART_TX_GPIO: "43"

@@ -303,14 +303,12 @@ esp32_improv:
   on_start:
     then:
       - logger.log: "Improv waiting for authorization"
-      - script.execute: sleep_prevent
   on_provisioned:
     then:
       - logger.log: "Improv provisioned"
   on_stop:
     then:
       - logger.log: "Improv stopped"
-      - script.execute: sleep_allow
 
 improv_serial:
   
@@ -588,8 +586,10 @@ script:
   - id: activity_sleep_prevent
     mode: parallel
     then:
+      - logger.log: "activity_sleep_prevent"
       - script.execute: sleep_prevent
       - delay: !lambda "return id(activity_sleep_block_time).state * 60 * 1000;"
+      - logger.log: "activity_sleep_prevent allow"
       - script.execute: sleep_allow
 
   # Show user instructions for connecting the device to HomeAssistant
@@ -611,9 +611,11 @@ script:
             # to connect to WiFi for some period of time manually,
             # which duplicates what Improv already does when ble is
             # enabled on boot.
+            - logger.log: "show setup image"
             - ble.enable
             - display.page.show: improv_setup
             - component.update: epaper_display
+            - script.execute: sleep_prevent
 
   # Show an image indicating setup is complete
   - id: show_improv_setup_complete
@@ -626,8 +628,10 @@ script:
             - globals.set: 
                 id: improv_setup_page_active
                 value: 'false'
+            - logger.log: "show setup complete image"
             - display.page.show: improv_setup_complete
             - component.update: epaper_display
+            - script.execute: sleep_allow
 
   # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
   # after 1 minute, show the Improv setup page. This timer can be canceled by
@@ -899,6 +903,7 @@ button:
         # I would prefer to group this 'sleep_prevent' with it's matching 'sleep_allow'
         # in the definition of 'current_image', but there is no 'on_download_start' trigger 
         # to attach it to. There is only 'on_download_finished'.
+        - logger.log: "refresh online image"
         - script.execute: sleep_prevent
         - component.update: current_image
 

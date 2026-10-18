@@ -88,8 +88,7 @@ esphome:
     name: Stebbins.ePaperDisplay
     version: dev
   includes:
-    - setup_image.h
-    - setup_complete_image.h
+    - images_png.h
   on_boot:
     priority: -100
     then:
@@ -137,8 +136,6 @@ esphome:
                 brightness: 50%
             - delay: 250ms
             - light.turn_off: buzzer
-      # Configure the Display Component to show our online images
-      - display.page.show: remote_image
       # The text component ImageURL gets restored upon reboot,
       # but the online_image current_image.url does not. 
       # Copy ImageURL to current_image.url
@@ -213,6 +210,7 @@ wifi:
     then:
       - delay: 5s
       - ble.disable
+      - script.execute: show_improv_setup_complete
         
 network:
   enable_ipv6: true
@@ -308,7 +306,6 @@ esp32_improv:
   on_provisioned:
     then:
       - logger.log: "Improv provisioned"
-      - script.execute: show_improv_setup_complete
   on_stop:
     then:
       - logger.log: "Improv stopped"
@@ -621,11 +618,15 @@ script:
   - id: show_improv_setup_complete
     mode: single
     then:
-      - globals.set: 
-          id: improv_setup_page_active
-          value: 'false'
-      - display.page.show: improv_setup_complete
-      - component.update: epaper_display
+      - if:
+          condition:
+            lambda: 'return id(improv_setup_page_active);'
+          then:
+            - globals.set: 
+                id: improv_setup_page_active
+                value: 'false'
+            - display.page.show: improv_setup_complete
+            - component.update: epaper_display
 
   # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
   # after 1 minute, show the Improv setup page. This timer can be canceled by
@@ -721,7 +722,7 @@ script:
                         # we wake again at the expected time.
                         - delay: 30s
                         - script.execute: do_sleep
-          
+
   # Handle changes to sleep duration
   #
   # run_duration    - minutes
@@ -852,6 +853,40 @@ script:
                   - script.wait: eval_sleep_duration
             - logger.log: "Allow Sleep"
             - deep_sleep.allow: dsleep
+
+  # Deocde and display a PNG that is stored in read-only memory
+  - id: show_png
+    mode: single
+    parameters: 
+      display: esphome::display::Display*
+      # index of image in images_png
+      index: int
+      # orientation of image DISPLAY_ROTATION_0_DEGREES or DISPLAY_ROTATION_90_DEGREES
+      rotation: esphome::display::DisplayRotation
+    then:
+      - lambda: |-
+          id(epaper_display).set_rotation(rotation);
+          esphome::runtime_image::RuntimeImage img(esphome::runtime_image::ImageFormat::PNG, 
+            esphome::image::IMAGE_TYPE_RGB565, esphome::image::TRANSPARENCY_OPAQUE);
+
+          const uint8_t* const png = images_png[index];
+          int img_size = images_size[index];
+          int offset = 0;
+
+          img.begin_decode(img_size, esphome::runtime_image::ImageFormat::PNG);
+          while (!img.is_decode_finished() && offset < img_size) {
+            auto consumed = img.feed_data((uint8_t*)&png[offset], img_size - offset);
+            if (consumed < 0) {
+              ESP_LOGD("display", "Error decoding image");
+              break;
+            }
+            offset += consumed;
+          }
+
+          img.end_decode();
+          display->image(0, 0, &img);
+          img.release();
+          
       
 button:
   # Virtual button for HomeAssistant to request loading the image URL
@@ -1105,6 +1140,7 @@ image:
       - logger.log: "Display says it's done"
       - delay: 1s
       - script.execute: sleep_allow
+      - online_image.release: current_image
     on_error:
       then:
         - logger.log: "online_image download error"
@@ -1130,50 +1166,12 @@ display:
       - id: improv_setup
         lambda: |-
           ESP_LOGD("display", "=== ePaper Setup Page refresh ===");
-          id(epaper_display).set_rotation(DISPLAY_ROTATION_90_DEGREES);
-          esphome::runtime_image::RuntimeImage img(esphome::runtime_image::ImageFormat::PNG, 
-            esphome::image::IMAGE_TYPE_RGB565, esphome::image::TRANSPARENCY_OPAQUE);
-
-          int img_size = sizeof(setup_png);
-          int offset = 0;
-
-          img.begin_decode(img_size, esphome::runtime_image::ImageFormat::PNG);
-          while (!img.is_decode_finished() && offset < img_size) {
-            auto consumed = img.feed_data((uint8_t*)&setup_png[offset], img_size - offset);
-            if (consumed < 0) {
-              ESP_LOGD("display", "Error decoding image");
-              break;
-            }
-            offset += consumed;
-          }
-
-          img.end_decode();
-          it.image(0, 0, &img);
-          img.release();
+          id(show_png).execute(&it, 0, DISPLAY_ROTATION_90_DEGREES);
 
       - id: improv_setup_complete
         lambda: |-
           ESP_LOGD("display", "=== ePaper Setup Complete Page refresh ===");
-          id(epaper_display).set_rotation(DISPLAY_ROTATION_90_DEGREES);
-          esphome::runtime_image::RuntimeImage img(esphome::runtime_image::ImageFormat::PNG, 
-            esphome::image::IMAGE_TYPE_RGB565, esphome::image::TRANSPARENCY_OPAQUE);
-
-          int img_size = sizeof(setup_complete_png);
-          int offset = 0;
-
-          img.begin_decode(img_size, esphome::runtime_image::ImageFormat::PNG);
-          while (!img.is_decode_finished() && offset < img_size) {
-            auto consumed = img.feed_data((uint8_t*)&setup_complete_png[offset], img_size - offset);
-            if (consumed < 0) {
-              ESP_LOGD("display", "Error decoding image");
-              break;
-            }
-            offset += consumed;
-          }
-
-          img.end_decode();
-          it.image(0, 0, &img);
-          img.release();
+          id(show_png).execute(&it, 1, DISPLAY_ROTATION_90_DEGREES);
 
 # =============================================================================
 # [9] Deep sleep

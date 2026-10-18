@@ -1157,6 +1157,7 @@ display:
     spi_id: epaper_spi_bus
     model: seeed-reterminal-e1004
     update_interval: never
+    auto_clear_enabled: false
     pages:
       - id: remote_image
         lambda: |-

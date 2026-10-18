@@ -1,5 +1,7 @@
 # Notes about the device
 
+This is my first ESPHome device. So feel free to point out my errors or any failure to follow commonly accepted practices.
+
 ## Device Entities
 ### Controls
 

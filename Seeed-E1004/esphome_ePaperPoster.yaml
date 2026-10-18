@@ -1148,8 +1148,8 @@ image:
 # It's really too bad there is not a compressed image 'file' format.
 # E.g. a compressed image in flash that is decoded when needed.
 # All the necessary components exist and it's not too hard to implement.
-# So I bundled up the images in a couple header files and implemented myself.
-# See code in 'improv_setup' display page lambda below...
+# So I bundled up the images in a header file and implemented myself.
+# See code in the 'show_png' script.
 
 display:
   - platform: epaper_spi

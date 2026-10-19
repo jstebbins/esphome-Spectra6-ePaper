@@ -596,7 +596,6 @@ script:
             - ble.enable
             - display.page.show: improv_setup
             - component.update: epaper_display
-            - script.execute: sleep_prevent
 
   # Show an image indicating setup is complete
   - id: show_improv_setup_complete
@@ -612,7 +611,6 @@ script:
             - logger.log: "show setup complete image"
             - display.page.show: improv_setup_complete
             - component.update: epaper_display
-            - script.execute: sleep_allow
 
   # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
   # after 1 minute, show the Improv setup page. This timer can be canceled by

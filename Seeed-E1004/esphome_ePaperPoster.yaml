@@ -78,6 +78,13 @@ substitutions:
   # If you want to disable deep sleep, you will need to adjust the deep_sleep component
   initial_run_duration: 4
   initial_run_sleep_cycle: 10
+  # Noises
+  rtttl_one_short: "one_short:d=4,o=5,b=100:16e6"
+  rtttl_two_short: "two_short:d=4,o=5,b=100:16e6,16e6"
+  rtttl_one_long: "one_long:d=1,o=5,b=100:e6"
+  rtttl_siren: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
+  rtttl_scale_up: "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"
+  rtttl_furelise: "furelise:d=8,o=5,b=125:e6,d#6,e6,d#6,e6,b,d6,c6,4a,p,c,e,a,4b,p,e,g#,b,4c6,p,e,e6,d#6,e6,d#6,e6,b,d6,c6,4a,p,c,e,a,4b,p,e,c6,b,2a"
 
 esphome:
   name: ${device_name}
@@ -131,11 +138,7 @@ esphome:
           condition:
             lambda: 'return (id(wake_source) != 0 && id(wake_source) != 1);'
           then:
-            - light.turn_on:
-                id: buzzer
-                brightness: 50%
-            - delay: 250ms
-            - light.turn_off: buzzer
+            - rtttl.play: ${rtttl_one_short}
       # The text component ImageURL gets restored upon reboot,
       # but the online_image current_image.url does not. 
       # Copy ImageURL to current_image.url
@@ -351,7 +354,11 @@ output:
   - platform: ledc
     pin: GPIO45
     id: buzzer_pwm
-    frequency: 1000Hz
+
+rtttl:
+  output: buzzer_pwm
+  id: kazoo
+  gain: 60%
 
 sensor:
   # --- Battery voltage (ADC on GPIO1) ---
@@ -430,11 +437,7 @@ binary_sensor:
             id: events
             event_type: right_button_press
         # Make some noise to acknowledge that the button press was recognized
-        - light.turn_on:
-            id: buzzer
-            brightness: 50%
-        - delay: 250ms
-        - light.turn_off: buzzer
+        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -466,11 +469,7 @@ binary_sensor:
             id: events
             event_type: left_button_press
         # Make some noise to acknowledge that the button press was recognized
-        - light.turn_on:
-            id: buzzer
-            brightness: 50%
-        - delay: 250ms
-        - light.turn_off: buzzer
+        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -502,11 +501,7 @@ binary_sensor:
             id: events
             event_type: refresh_button_press
         # Make some noise to acknowledge that the button press was recognized
-        - light.turn_on:
-            id: buzzer
-            brightness: 50%
-        - delay: 250ms
-        - light.turn_off: buzzer
+        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -527,26 +522,12 @@ binary_sensor:
           - ON for at least 10s
         then:
           # Double chirp warning that factory reset is aproaching
-          - light.turn_on:
-              id: buzzer
-              brightness: 50%
-          - delay: 150ms
-          - light.turn_off: buzzer
-          - delay: 250ms
-          - light.turn_on:
-              id: buzzer
-              brightness: 50%
-          - delay: 150ms
-          - light.turn_off: buzzer
+          - rtttl.play: ${rtttl_two_short}
       - timing:
           - ON for at least 20s
         then:
           # Long Buzz to notify that factory reset is initiated
-          - light.turn_on:
-              id: buzzer
-              brightness: 50%
-          - delay: 500ms
-          - light.turn_off: buzzer
+          - rtttl.play: ${rtttl_one_long}
           - lambda: id(factory_reset_requested) = true;
           
   # [9] SD card detect (LOW = card present)
@@ -915,6 +896,14 @@ button:
       then:
         - script.execute: do_sleep
 
+  # Play the rtttl script in rtttl_song
+  - platform: template
+    name: "Play RTTTL"
+    icon: "mdi:music"
+    on_press:
+      then:
+        - rtttl.play: !lambda "return id(rtttl_song).state;"
+
   - platform: factory_reset
     id: factory_reset_button
     name: "Factory Reset"
@@ -932,17 +921,6 @@ light:
     name: "Onboard LED"
     output: bsp_led
     id: onboard_led
-
-  # Buzzer wrapped as a "light": brightness = volume
-  # 蜂鸣器包装成"灯"实体：亮度 = 音量
-  - platform: monochromatic
-    output: buzzer_pwm
-    name: "Buzzer"
-    id: buzzer
-    default_transition_length: 0s
-    initial_state: 
-      state: OFF
-      brightness: 50%
 
 datetime:
   # Time to wake when 'wake_at' sleep type is used
@@ -1123,6 +1101,16 @@ text:
       - logger.log:
           format: 'URL set: %s'
           args: ["x.c_str()"]
+  - platform: template
+    id: rtttl_song
+    name: "RTTTL Song"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    initial_value: ${rtttl_furelise}
+    restore_value: false
+    mode: text
+    icon: "mdi:music"
 
 # This is required by the online_image component below
 http_request:

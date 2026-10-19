@@ -7,16 +7,18 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
 
 - Activity Timeout: Number in minutes
     - When a button is pressed on the device, sleep will be prevented for this amount of time
-- Buzzer: Switch
-    - Sounds the buzzer on the device
 - Image URL: Text entry
     - The image URL to load when `Refresh Display` is pressed
 - Landscape: Switch
     - Sets the frame to landscape display mode (default mode is Portrait)
 - Onboard LED: Switch
     - Turns on the LED indicator on the back of the frame
+- Play RTTTL: Button
+    - Plays the RTTTL (Ring Tone Text Transfer Language) script in the `RTTL Song` entity
 - Refresh Display: Button
     - Initiates an update of the display using `Image URL`
+- RTTTL Sone: Text entry
+    - An RTTTL script to play through the buzzer when `Play RTTTL` is pressed
 - Sleep: Button
     - Requests that the device enter sleep mode. The device may not immediately enter sleep mode if it is updating it's display or there has been recent user activity.
 - Wake At: Time HH:MM

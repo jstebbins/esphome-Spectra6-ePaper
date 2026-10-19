@@ -17,7 +17,7 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
     - Plays the RTTTL (Ring Tone Text Transfer Language) script in the `RTTL Song` entity
 - Refresh Display: Button
     - Initiates an update of the display using `Image URL`
-- RTTTL Sone: Text entry
+- RTTTL Song: Text entry
     - An RTTTL script to play through the buzzer when `Play RTTTL` is pressed
 - Sleep: Button
     - Requests that the device enter sleep mode. The device may not immediately enter sleep mode if it is updating it's display or there has been recent user activity.

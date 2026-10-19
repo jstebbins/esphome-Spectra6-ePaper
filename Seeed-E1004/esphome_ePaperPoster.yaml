@@ -207,9 +207,6 @@ psram:
 wifi:
   id: my_wifi
   use_psram: true
-  ap:
-    ssid: PosterSeeed
-    password: ItsASecret2U!
   on_connect:
     then:
       - delay: 5s
@@ -293,8 +290,6 @@ ota:
       then:
         - logger.log: "OTA Fail"
         - script.execute: sleep_allow
-
-captive_portal:
 
 esp32_ble:
   use_psram: true

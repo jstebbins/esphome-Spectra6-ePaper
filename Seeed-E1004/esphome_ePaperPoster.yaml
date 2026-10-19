@@ -794,32 +794,26 @@ script:
 
   # 'deep_sleep.prevent/allow' does not reference count. So nested
   # calls would enable sleep upon the first 'deep_sleep.allow'. So
-  # these ref count prevent/allow
-  - id: sleep_prevent
+  # this script ref counts prevent/allow
+  #
+  # Route all sleep prevent/allow through this script.
+  # Queued mode provides a locking mechanism to prevent
+  # simultaneous modification of sleep_prevent_count.
+  - id: sleep_prevent_allow
     mode: queued
+    parameters:
+      delta: int
     then:
       - logger.log:
-          format: "Prevent count %d"
-          args: ['id(sleep_prevent_count)']
+          format: "sleep_prevent_count %d delta %d"
+          args: ['id(sleep_prevent_count)', 'delta']
+      - lambda: id(sleep_prevent_count) += delta;
       - if:
           condition:
-            lambda: return id(sleep_prevent_count) == 0;
+            lambda: return id(sleep_prevent_count) == 1;
           then:
             - logger.log: "Prevent Sleep"
             - deep_sleep.prevent: dsleep
-      - lambda: id(sleep_prevent_count) += 1;
-      
-  - id: sleep_allow
-    mode: queued
-    then:
-      - logger.log:
-          format: "Allow count %d"
-          args: ['id(sleep_prevent_count)']
-      - if:
-          condition:
-            lambda: return id(sleep_prevent_count) > 0;
-          then:
-            - lambda: id(sleep_prevent_count) -= 1;
       - if:
           condition:
             lambda: return id(sleep_prevent_count) == 0;
@@ -837,6 +831,28 @@ script:
                   - script.wait: eval_sleep_duration
             - logger.log: "Allow Sleep"
             - deep_sleep.allow: dsleep
+      - if:
+          condition:
+            lambda: return id(sleep_prevent_count) < 0;
+          then:
+            - logger.log: "Error: Sleep Prevent/Allow Mismatch"
+            - globals.set:
+                id: sleep_prevent_count
+                value: '0'
+
+  - id: sleep_prevent
+    mode: parallel
+    then:
+      - script.execute:
+          id: sleep_prevent_allow
+          delta: 1
+
+  - id: sleep_allow
+    mode: parallel
+    then:
+      - script.execute:
+          id: sleep_prevent_allow
+          delta: -1
 
   # Deocde and display a PNG that is stored in read-only memory
   - id: show_png

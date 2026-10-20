@@ -18,7 +18,7 @@ blueprint:
     slideshow_enable:
       name: Play/Pause Entity (Optional)
       description: Switch used to play/pause the slideshow
-      default: {}
+      default:
       selector:
         entity:
           multiple: false
@@ -195,7 +195,7 @@ actions:
                 image_count: '{{ RandoImages | length }}'
         - if:
             - condition: template
-              value_template: '{{ slideshow_enable | length == 0 or is_state(slideshow_enable, "on") or button_press }}'
+              value_template: '{{ slideshow_enable is none or is_state(slideshow_enable, "on") or button_press }}'
           then:
             - variables:
                 image_index: >-

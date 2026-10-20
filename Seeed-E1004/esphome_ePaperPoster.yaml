@@ -65,7 +65,7 @@ globals:
     initial_value: 'false'
   - id: improv_setup_page_active
     type: bool
-    restore_value: false
+    restore_value: true
     initial_value: 'false'
     
 substitutions:
@@ -85,6 +85,10 @@ substitutions:
   rtttl_siren: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
   rtttl_scale_up: "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b"
   rtttl_furelise: "furelise:d=8,o=5,b=125:e6,d#6,e6,d#6,e6,b,d6,c6,4a,p,c,e,a,4b,p,e,g#,b,4c6,p,e,e6,d#6,e6,d#6,e6,b,d6,c6,4a,p,c,e,a,4b,p,e,c6,b,2a"
+  rtttl_popcorn: "popcorn:d=16,o=5,b=63:c#6,b,c#6,g#,32e,g#,8c#,c#6,b,c#6,g#,32e,g#,8c#,c#6,d#6,e6,32d#6,e6,32e6,c#6,d#6,32c#6,d#6,32d#6,b,c#6,32b,c#6,32c#6,a,8c#6"
+  rtttl_chicken: "chicken:d=32,o=5,b=50:g#,g#,a#,a#,f,f,16g#,g#,g#,a#,a#,f,f,16g#,g#,g#,a#,a#,c#6,c#6,16c6,16c6,16a#,16g#,16f#,f#,f#,g#,g#,d#,d#,16f#,f#,f#,g#,g#,d#,d#,16f#,f#,f#,g#,g#,a#,c6,16c#6,16a#,16g#,16f,16c#"
+  rtttl_bumble: "bumble:d=4,o=5,b=160:16e,16d#,16d,16c#,16c,16f,16e,16d#,16e,16d#,16d,16c#,16c,16c#,16d,16d#,16e,16d#,16d,16c#,16c,16f,16e,16d#,16e,16d#,16d,16c#,16c,16c#,16d,16d#,16e,16d#,16d,16c#,16c"
+  rtttl_sos: "sos:d=16,o=6,b=160:g,p,g,p,g,4p,8g.,p,8g.,p,8g.,4p,g,p,g,p,g,1p,g,p,g,p,g,4p,8g.,p,8g.,p,8g.,4p,g,p,g,p,g"
 
 esphome:
   name: ${device_name}
@@ -591,6 +595,7 @@ script:
             - ble.enable
             - display.page.show: improv_setup
             - component.update: epaper_display
+            - rtttl.play: ${rtttl_scale_up}
 
   # Show an image indicating setup is complete
   - id: show_improv_setup_complete
@@ -606,6 +611,7 @@ script:
             - logger.log: "show setup complete image"
             - display.page.show: improv_setup_complete
             - component.update: epaper_display
+            - rtttl.play: ${rtttl_popcorn}
 
   # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
   # after 1 minute, show the Improv setup page. This timer can be canceled by
@@ -1117,7 +1123,7 @@ text:
     min_length: 0
     max_length: 255
     initial_value: ${rtttl_furelise}
-    restore_value: false
+    restore_value: true
     mode: text
     icon: "mdi:music"
 
@@ -1171,7 +1177,6 @@ display:
         lambda: |-
           ESP_LOGD("display", "=== ePaper Setup Page refresh ===");
           id(show_png).execute(&it, 0, DISPLAY_ROTATION_90_DEGREES);
-
       - id: improv_setup_complete
         lambda: |-
           ESP_LOGD("display", "=== ePaper Setup Complete Page refresh ===");

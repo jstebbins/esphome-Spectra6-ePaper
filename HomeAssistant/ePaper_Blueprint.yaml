@@ -3,18 +3,6 @@ blueprint:
   description: Show a slideshow on an ePaper display
   domain: automation
   input:
-    slideshow_start:
-      name: Automation Trigger Entity
-      description: Switch that starts the slideshow automation
-      selector:
-        entity:
-          multiple: false
-          filter:
-            domain:
-              - switch
-              - light
-              - binary_sensor
-              - input_boolean
     slideshow_enable:
       name: Play/Pause Entity (Optional)
       description: Switch used to play/pause the slideshow
@@ -61,23 +49,48 @@ variables:
   slideshow_schedule: !input slideshow_schedule
   slideshow_enable: !input slideshow_enable
 
+mode: single
+max_exceeded: silent
 triggers:
-  - trigger: state
-    entity_id: !input slideshow_start
-    from:
-    to:
-    - 'on'
-  - trigger: homeassistant
-    event: start
-conditions:
-  - condition: switch.is_on
+  - trigger: event.received
     target:
-      entity_id: !input slideshow_start
+      device_id: !input epaper_devices
+    id: sleep_timeout
     options:
-      behavior: any
-      for: 00:00:00
+      event_type:
+      - sleep_timeout
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: wake_at_timeout
+    options:
+      event_type:
+      - wake_at_timeout
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: right_button_press
+    options:
+      event_type:
+      - right_button_press
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: left_button_press
+    options:
+      event_type:
+      - left_button_press
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: refresh_button_press
+    options:
+      event_type:
+      - refresh_button_press
 actions:
   - variables:
+      trigger_id: '{{ trigger.id }}'
+      trigger_entity_id: '{{ trigger.entity_id }}'
       RandoImages: '{{ shuffle(state_attr(image_source, "filelist")) }}'
       image_source_sha: '{{ state_attr( image_source, "sha256sum" ) }}'
       image_index: 0
@@ -86,104 +99,54 @@ actions:
       last_scheduled_time: '{{ as_timestamp(now()) }}'
   - repeat:
       while:
-        - condition: switch.is_on
-          target:
-            entity_id: !input slideshow_start
-          options:
-            behavior: any
-            for: 00:00:00
+        - condition: template
+          value_template: '{{ states(this.entity_id) == "on" }}'
       sequence:
-        - wait_for_trigger:
-          - trigger: event.received
-            target:
-              device_id: !input epaper_devices
-            id: wake_at_timeout
-            options:
-              event_type:
-              - wake_at_timeout
-            variables:
-              next_prev: 1
-          - trigger: event.received
-            target:
-              device_id: !input epaper_devices
-            id: right_button_press
-            options:
-              event_type:
-              - right_button_press
-            variables:
-              next_prev: 1
-          - trigger: event.received
-            target:
-              device_id: !input epaper_devices
-            id: left_button_press
-            options:
-              event_type:
-              - left_button_press
-            variables:
-              next_prev: -1
-          - trigger: event.received
-            target:
-              device_id: !input epaper_devices
-            id: refresh_button_press
-            options:
-              event_type:
-              - refresh_button_press
-            variables:
-              next_prev: 1
-          - trigger: switch.turned_off
-            target:
-              entity_id: !input slideshow_start
-            id: slideshow_off
-            options:
-              behavior: each
-              for: 00:00:00
-            variables:
-              next_prev: 0
-          continue_on_timeout: false
-        - condition: switch.is_on
-          target:
-            entity_id: !input slideshow_start
-          options:
-            behavior: any
-            for: 00:00:00
-        - choose:
-          - conditions: '{{ wait.trigger.id == "wake_at_timeout" }}'
-            sequence:
-              - variables:
-                  advance_schedule: true
-                  button_press: false
-                  next_prev: 1
-          - conditions: '{{ wait.trigger.id == "right_button_press" }}'
-            sequence:
-              - variables:
-                  advance_schedule: false
-                  button_press: true
-                  next_prev: 1
-          - conditions: '{{ wait.trigger.id == "left_button_press" }}'
-            sequence:
-              - variables:
-                  advance_schedule: false
-                  button_press: true
-                  next_prev: -1
-          - conditions: '{{ wait.trigger.id == "refresh_button_press" }}'
-            sequence:
-              - variables:
-                  advance_schedule: true
-                  button_press: true
-                  next_prev: 1
-          default:
-            - variables:
-                advance_schedule: false
-                button_press: false
-                next_prev: 0
         - variables:
-            epaper_device: '{{ device_id( wait.trigger.entity_id ) }}'
+            epaper_device: '{{ device_id( trigger_entity_id ) }}'
             image_url_entity: '{{ device_entities(epaper_device) | select("match", ".*_image_url") | first }}'
             refresh_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_refresh_display") | first }}'
             sleep_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_sleep") | first }}'
             wake_at_entity: '{{ device_entities(epaper_device) | select("match", ".*_wake_at") | first }}'
             wake_timer_type: '{{ device_entities(epaper_device) | select("match", ".*_wake_timer_type") | first }}'
             next_wake_time: '{{ as_timestamp(now() + timedelta(days=1)) }}'
+        - choose:
+          - conditions: '{{ trigger_id == "sleep_timeout" }}'
+            sequence:
+              - variables:
+                  next_prev: 0
+                  advance_schedule: false
+              - if:
+                  - condition: template
+                    value_template: '{{ states(wake_timer_type) == "Wake Every" }}'
+                then:
+                  - variables:
+                      next_prev: 1
+                      advance_schedule: true
+          - conditions: '{{ trigger_id == "wake_at_timeout" }}'
+            sequence:
+              - variables:
+                  advance_schedule: true
+                  next_prev: 1
+          - conditions: '{{ trigger_id == "right_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: false
+                  next_prev: 1
+          - conditions: '{{ trigger_id == "left_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: false
+                  next_prev: -1
+          - conditions: '{{ trigger_id == "refresh_button_press" }}'
+            sequence:
+              - variables:
+                  advance_schedule: true
+                  next_prev: 1
+          default:
+            - variables:
+                advance_schedule: false
+                next_prev: 0
         - if:
             - condition: template
               value_template: '{{ image_source_sha != state_attr( image_source, "sha256sum" ) }}'
@@ -195,7 +158,7 @@ actions:
                 image_count: '{{ RandoImages | length }}'
         - if:
             - condition: template
-              value_template: '{{ slideshow_enable is none or is_state(slideshow_enable, "on") or button_press }}'
+              value_template: '{{ next_prev != 0 and (slideshow_enable is none or is_state(slideshow_enable, "on")) }}'
           then:
             - variables:
                 image_index: >-
@@ -276,13 +239,53 @@ actions:
                 entity_id: '{{ wake_timer_type }}'
               data:
                 option: Wake At
-        - delay:
-            hours: 0
-            minutes: 0
-            seconds: 4
-            milliseconds: 0
-        - action: button.press
-          metadata: {}
-          target:
-            entity_id: '{{ sleep_button_entity }}'
-          data: {}
+            - delay:
+                hours: 0
+                minutes: 0
+                seconds: 4
+                milliseconds: 0
+            - action: button.press
+              metadata: {}
+              target:
+                entity_id: '{{ sleep_button_entity }}'
+              data: {}
+        - wait_for_trigger:
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: sleep_timeout
+            options:
+              event_type:
+              - sleep_timeout
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: wake_at_timeout
+            options:
+              event_type:
+              - wake_at_timeout
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: right_button_press
+            options:
+              event_type:
+              - right_button_press
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: left_button_press
+            options:
+              event_type:
+              - left_button_press
+          - trigger: event.received
+            target:
+              device_id: !input epaper_devices
+            id: refresh_button_press
+            options:
+              event_type:
+              - refresh_button_press
+          continue_on_timeout: false
+        - variables:
+            trigger_id: '{{ wait.trigger.id }}'
+            trigger_entity_id: '{{ wait.trigger.entity_id }}'

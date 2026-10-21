@@ -300,7 +300,7 @@ esp32_ble:
   name: posterseeed
   enable_on_boot: false
 
-esp32_improv:
+improv_ble:
   authorizer: button_5
   on_start:
     then:

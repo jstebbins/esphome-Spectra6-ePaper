@@ -9,7 +9,7 @@ esphome:
     priority: -99
     then:
       - lambda: |-
-          id(update_http_request).set_source_url(id(updates_url).state);
+          id(update_http_request).set_source_url(id(updates_url).state.c_str());
 
 ota:
   - platform: http_request
@@ -59,7 +59,7 @@ text:
     icon: "mdi:update"
     set_action:
       - lambda: |-
-          id(update_http_request).set_source_url(x);
+          id(update_http_request).set_source_url(x.c_str());
       - logger.log:
           format: 'Manifest URL set: %s'
           args: ["x.c_str()"]

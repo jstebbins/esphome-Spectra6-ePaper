@@ -104,8 +104,8 @@ actions:
       sequence:
         - variables:
             epaper_device: '{{ device_id( trigger_entity_id ) }}'
-            image_url_entity: '{{ device_entities(epaper_device) | select("match", ".*_image_url") | first }}'
-            refresh_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_refresh_display") | first }}'
+            poster_mac: '{{ trigger_entity_id | regex_replace("event\..*(_[0-9a-f]+_)actions", "\\1") }}'
+            show_image_action: '{{ "esphome.poster_seeed" + poster_mac + "show_image" }}'
             sleep_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_sleep") | first }}'
             wake_at_entity: '{{ device_entities(epaper_device) | select("match", ".*_wake_at") | first }}'
             wake_timer_type: '{{ device_entities(epaper_device) | select("match", ".*_wake_timer_type") | first }}'
@@ -169,22 +169,9 @@ actions:
                     {% set image_index = 0 %}
                   {% endif %}
                   {{ image_index }}
-            - action: text.set_value
-              metadata: {}
-              target:
-                entity_id: '{{ image_url_entity }}'
+            - action: '{{ show_image_action }}'
               data:
-                value: '{{ base_url + ''/'' + (RandoImages[image_index] | urlencode) }}'
-            - delay:
-                hours: 0
-                minutes: 0
-                seconds: 2
-                milliseconds: 0
-            - action: button.press
-              metadata: {}
-              target:
-                entity_id: '{{ refresh_button_entity }}'
-              data: {}
+                image_url: '{{ base_url + ''/'' + (RandoImages[image_index] | urlencode) }}'
         - if:
             - condition: template
               value_template: '{{ advance_schedule }}'

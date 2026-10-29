@@ -143,16 +143,6 @@ esphome:
             lambda: 'return (id(wake_source) != 0 && id(wake_source) != 1);'
           then:
             - rtttl.play: ${rtttl_one_short}
-      # The text component ImageURL gets restored upon reboot,
-      # but the online_image current_image.url does not. 
-      # Copy ImageURL to current_image.url
-      - online_image.set_url:
-          id: current_image
-          update: false
-          url: !lambda return id(ImageURL).state;
-      - logger.log:
-          format: 'Init Image URL: %s'
-          args: ['id(ImageURL).state.c_str()']
       - if:
           condition:
             lambda: |-
@@ -231,6 +221,32 @@ logger:
 api:
   id: my_api
   encryption: # Let HomeAssistant assign the key
+  outgoing_connection:
+  actions:
+    - action: show_image
+      description: Download and show an image URL
+      variables:
+        image_url:
+          type: string
+          description: A URL to an image (PNG)
+          example: "http://homeassistant.local:8123/local/Images/some_image.png"
+      then:
+        - script.execute: sleep_prevent
+        - online_image.set_url:
+            id: current_image
+            update: true
+            url: !lambda "return image_url;"
+    - action: play_kazoo
+      description: Play a melody on the buzzer
+      variables:
+        song_str:
+          type: string
+          description: Melody in RTTTL format
+          example: "two_short:d=4,o=5,b=100:16e6,16e6"
+      then:
+        - rtttl.play:
+            rtttl: !lambda "return song_str;"
+
   on_client_connected:
     # Send events and button presses that triggered a wake-up.
     # Nothing is sent if we are simply reconnecting due to communication loss.
@@ -593,9 +609,15 @@ script:
             # enabled on boot.
             - logger.log: "show setup image"
             - ble.enable
+            - script.execute: sleep_prevent
             - display.page.show: improv_setup
             - component.update: epaper_display
             - rtttl.play: ${rtttl_scale_up}
+            - wait_until: 
+                condition:
+                  component.is_idle: epaper_display
+                timeout: 60s
+            - script.execute: sleep_allow
 
   # Show an image indicating setup is complete
   - id: show_improv_setup_complete
@@ -609,9 +631,15 @@ script:
                 id: improv_setup_page_active
                 value: 'false'
             - logger.log: "show setup complete image"
+            - script.execute: sleep_prevent
             - display.page.show: improv_setup_complete
             - component.update: epaper_display
             - rtttl.play: ${rtttl_popcorn}
+            - wait_until: 
+                condition:
+                  component.is_idle: epaper_display
+                timeout: 60s
+            - script.execute: sleep_allow
 
   # improv_setup_timer is run on boot.  If we do not connect to wifi and HomeAssistant
   # after 1 minute, show the Improv setup page. This timer can be canceled by
@@ -901,7 +929,10 @@ button:
         # to attach it to. There is only 'on_download_finished'.
         - logger.log: "refresh online image"
         - script.execute: sleep_prevent
-        - component.update: current_image
+        - online_image.set_url:
+            id: current_image
+            update: true
+            url: !lambda "return id(ImageURL).state;"
 
   # Virtual button for HomeAssistant to request entry into deep sleep
   - platform: template
@@ -1051,9 +1082,6 @@ switch:
     name: "Landscape"
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
-    on_state:
-      then:
-        - lambda: 'id(epaper_display).set_rotation(x ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);'
 
 event:
   # Events sent to HomeAssistant to notify of various actions
@@ -1108,14 +1136,6 @@ text:
     restore_value: true
     mode: text
     icon: "mdi:image-album"
-    set_action:
-      - online_image.set_url:
-          id: current_image
-          update: false
-          url: !lambda return x;
-      - logger.log:
-          format: 'URL set: %s'
-          args: ["x.c_str()"]
   - platform: template
     id: rtttl_song
     name: "RTTTL Song"
@@ -1140,6 +1160,7 @@ image:
     # the update to complete
     on_download_finished:
       - display.page.show: remote_image
+      - lambda: 'id(epaper_display).set_rotation(id(landscape_mode).state ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);'
       - component.update: epaper_display
       - wait_until: 
           condition:
@@ -1171,7 +1192,6 @@ display:
       - id: remote_image
         lambda: |-
           ESP_LOGD("display", "=== ePaper Online Image Page refresh ===");
-          id(epaper_display).set_rotation(id(landscape_mode).state ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);
           it.image(0, 0, id(current_image));
       - id: improv_setup
         lambda: |-

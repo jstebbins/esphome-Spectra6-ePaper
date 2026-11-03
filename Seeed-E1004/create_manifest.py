@@ -41,7 +41,7 @@ class Manifest:
       "name": "Stebbins.ePaperDisplay",
       "version": "",
       "home_assistant_domain": "esphome",
-      "new_install_prompt_erase": False,
+      "new_install_prompt_erase": True,
       "builds": [
         {
           "chipFamily": "ESP32-S3",

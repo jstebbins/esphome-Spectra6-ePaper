@@ -1,0 +1,67 @@
+blueprint:
+  name: ePaper Scheduler
+  description: Schedule the wake times for a collection of ePaper devices
+  domain: script
+  author: John Stebbins
+  homeassistant:
+    min_version: 2024.6.0
+  input:
+    epaper_devices:
+      name: ePaper Devices
+      description: Devices to send images to
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: esphome
+              manufacturer: "Stebbins"
+              model: "ePaperDisplay"
+    slideshow_schedule:
+      name: Slideshow Schedule
+      description: Specify when images are updated
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain:
+              - schedule
+variables:
+  epaper_devices: !input epaper_devices
+  slideshow_schedule: !input slideshow_schedule
+
+mode: single
+max_exceeded: silent
+sequence:
+  - variables:
+      day_names: '{{ ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] }}'
+  - action: schedule.get_schedule
+    target:
+      entity_id: !input slideshow_schedule
+    response_variable: wake_schedule
+  - repeat:
+      for_each: !input epaper_devices
+      sequence:
+        - variables:
+            mac: '{{ "_" + device_attr(repeat.item, "name")[-6:] + "_" }}'
+            set_schedule_action: '{{ "esphome.poster_seeed" + mac + "set_schedule" }}'
+            index: '{{ repeat.index }}'
+            json_schedule: >-
+              {% set count = epaper_devices | length %}
+              {% set ns0 = namespace(days=[]) %}
+              {% for day_of_week in day_names %}
+                {% set ns1 = namespace(events=[]) %}
+                {% set event_count = wake_schedule[slideshow_schedule][day_of_week] | length %}
+                {% for ii in range(((event_count + count - 1) / count) | int) %}
+                  {% set jj = ii * count + repeat.index - 1 %}
+                  {% if jj < event_count %}
+                    {% set event = wake_schedule[slideshow_schedule][day_of_week][jj] %}
+                    {% set from = event.from.strftime("%H:%M") %}
+                    {% set ns1.events = ns1.events + [from] %}
+                  {% endif %}
+                {% endfor %}
+                {% set ns0.days = ns0.days + [{"events": ns1.events}] %}
+              {% endfor %}
+              {{ { "days": ns0.days } }}
+        - action: '{{ set_schedule_action }}'
+          data:
+            schedule: '{{ json_schedule }}'

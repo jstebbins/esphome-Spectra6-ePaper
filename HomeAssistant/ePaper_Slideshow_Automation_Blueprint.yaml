@@ -1,0 +1,184 @@
+blueprint:
+  name: ePaper Slideshow
+  description: Show a slideshow on an ePaper display
+  domain: automation
+  input:
+    slideshow_enable:
+      name: Play/Pause Entity (Optional)
+      description: Switch used to play/pause the slideshow
+      default:
+      selector:
+        entity:
+          multiple: false
+          filter:
+            domain:
+              - switch
+              - light
+              - binary_sensor
+              - input_boolean
+    epaper_devices:
+      name: ePaper Devices
+      description: Devices to send images to
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: esphome
+              manufacturer: "Stebbins"
+              model: "ePaperDisplay"
+    randomize:
+      name: Randomize Images
+      description: Show Images in random order
+      default: true
+      selector:
+        boolean:
+    current_image:
+      name: Current Image Index (Optional)
+      description: Index of last shown image (required for Sequential image display)
+      default:
+      selector:
+        entity:
+          multiple: false
+          filter:
+            integration: input_number
+    image_source:
+      name: File List Entity
+      description: An entity containing the URL as state value and a filelist attribute
+      selector:
+        entity:
+          filter:
+            domain:
+              - sensor
+variables:
+  image_source: !input image_source
+  base_url: '{{ states( image_source ) }}'
+  slideshow_enable: !input slideshow_enable
+  current_image: !input current_image
+  randomize: !input randomize
+
+mode: queued
+max: 10
+max_exceeded: silent
+triggers:
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: sleep_timeout
+    options:
+      event_type:
+      - sleep_timeout
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: wake_at_timeout
+    options:
+      event_type:
+      - wake_at_timeout
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: right_button_press
+    options:
+      event_type:
+      - right_button_press
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: left_button_press
+    options:
+      event_type:
+      - left_button_press
+  - trigger: event.received
+    target:
+      device_id: !input epaper_devices
+    id: refresh_button_press
+    options:
+      event_type:
+      - refresh_button_press
+actions:
+  - variables:
+      trigger_id: '{{ trigger.id }}'
+      trigger_entity_id: '{{ trigger.entity_id }}'
+      Images: '{{ state_attr(image_source, "filelist") }}'
+      image_count: '{{ Images | length }}'
+      epaper_device: '{{ device_id( trigger_entity_id ) }}'
+      mac: '{{ "_" + device_attr(epaper_device, "name")[-6:] + "_" }}'
+      show_image_action: '{{ "esphome.poster_seeed" + mac + "show_image" }}'
+      sleep_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_sleep") | first }}'
+      wake_timer_type: '{{ device_entities(epaper_device) | select("match", ".*_wake_timer_type") | first }}'
+
+  - choose:
+    - conditions: '{{ trigger_id == "sleep_timeout" }}'
+      sequence:
+        - variables:
+            next_prev: 0
+            button_press: false
+        - if:
+            - condition: template
+              value_template: '{{ states(wake_timer_type) != "Schedule" }}'
+          then:
+            - variables:
+                next_prev: 1
+    - conditions: '{{ trigger_id == "wake_at_timeout" }}'
+      sequence:
+        - variables:
+            next_prev: 1
+            button_press: false
+    - conditions: '{{ trigger_id == "right_button_press" }}'
+      sequence:
+        - variables:
+            next_prev: 1
+            button_press: true
+    - conditions: '{{ trigger_id == "left_button_press" }}'
+      sequence:
+        - variables:
+            next_prev: -1
+            button_press: true
+    - conditions: '{{ trigger_id == "refresh_button_press" }}'
+      sequence:
+        - variables:
+            next_prev: 0
+            button_press: true
+    default:
+      - variables:
+          next_prev: 0
+          button_press: false
+  - if:
+      - condition: template
+        value_template: '{{ next_prev != 0 and (slideshow_enable is none or is_state(slideshow_enable, "on")) }}'
+    then:
+      - variables:
+          image_index: >-
+            {% if not button_press and (randomize or current_image is none) %}
+              {{ range(image_count) | random }}
+            {% else %}
+              {% set next = states(current_image) | int(0) + next_prev %}
+              {% if next < 0 %}
+                {% set next = image_count - 1 %}
+              {% elif next >= image_count %}
+                {% set next = 0 %}
+              {% endif %}
+              {{ next }}
+            {% endif %}
+      - if:
+          - condition: template
+            value_template: '{{ current_image is not none }}'
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: '{{ current_image }}'
+            data:
+              value: '{{ image_index }}'
+      - action: '{{ show_image_action }}'
+        data:
+          image_url: '{{ base_url + ''/'' + (Images[image_index] | urlencode) }}'
+      - delay:
+          hours: 0
+          minutes: 0
+          seconds: 4
+          milliseconds: 0
+      - action: button.press
+        metadata: {}
+        target:
+          entity_id: '{{ sleep_button_entity }}'
+        data: {}

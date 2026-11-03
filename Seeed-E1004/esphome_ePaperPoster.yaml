@@ -20,6 +20,10 @@
 # =============================================================================
 
 globals:
+  # ###########################################################################
+  # This group of globals are transient. They are reset upon sleep or powerdown
+  # ###########################################################################
+ 
   # When woken from deep sleep, record the cause here
   # This will be used to publish a wake cause event
   # to HA after a client connection is established.
@@ -45,28 +49,49 @@ globals:
   # Track when we wake from sleep. If we are put to sleep early
   # we must adjust the sleep period to keep the cycle time accurate.
   - id: run_start_time
-    type: long int
+    type: time_t
     restore_value: false
     initial_value: '0'
-  # Convenience flag to let us know we are waking on a constant cycle
-  - id: use_wake_every
-    type: bool
+  - id: run_end_time
+    type: time_t
     restore_value: false
-    initial_value: 'true'
+    initial_value: '0'
   # When the esp32 internal RTC wakes us early, this is the amount
   # of time we must wait before sending the wake_at_timeout event.
   - id: wake_at_delay
-    type: int
+    type: time_t
     restore_value: false
     initial_value: '0'
+  - id: wake_time_expired
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   - id: factory_reset_requested
     type: bool
     restore_value: false
+    initial_value: 'false'
+
+  # ###########################################################################
+  # This group of globals gets backed up to NVS
+  # ###########################################################################
+ 
+  # Convenience flag to let us know we are waking on a constant cycle
+  - id: use_schedule
+    type: bool
+    restore_value: true
     initial_value: 'false'
   - id: improv_setup_page_active
     type: bool
     restore_value: true
     initial_value: 'false'
+  - id: next_wake_timestamp
+    type: time_t
+    restore_value: true
+    initial_value: '0'
+  - id: wake_schedule
+    type: char[1024]
+    restore_value: true
+    initial_value: '{0,0}'
     
 substitutions:
   # If you take control of this device and you have multiple instances
@@ -99,6 +124,8 @@ esphome:
     name: Stebbins.ePaperDisplay
     version: dev
   includes:
+    - <sstream>
+    - <regex>
     - images_png.h
   on_boot:
     priority: -100
@@ -126,16 +153,24 @@ esphome:
           // Start the run timer
           id(dsleep).setup();
           id(run_start_time) = id(rtc_time).now().timestamp;
+          id(run_end_time) = id(run_start_time) + id(run_duration).state * 60 * 1000;
       - logger.log:
-          format: 'Run start time: %ld'
+          format: 'Run start time: %lld'
           args: ['id(run_start_time)']
+      - if:
+          condition: 
+            lambda: "return (id(wake_source) <= 1);"
+          then:
+            # The esp32 internal RTC wakes us early due to drift.
+            # Send a wake_at_timeout event when the wake_at time actually
+            # arrives.
+            - script.execute: wake_time_timer
       # Initialize 'sleep_duration' for deep sleep
       - script.execute:
           id: eval_sleep_duration
           run_duration: !lambda "return id(run_duration).state;"
           run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          wake_hour: !lambda "return id(wake_time).hour;"
-          wake_minute: !lambda "return id(wake_time).minute;"
+          next_wake_time: !lambda "return id(next_wake_timestamp);"
       # Run a short buzzer if wakeing up from button press
       # to indicate we are alive
       - if:
@@ -246,6 +281,83 @@ api:
       then:
         - rtttl.play:
             rtttl: !lambda "return song_str;"
+    - action: set_schedule
+      description: Set Wake Schedule
+      supports_response: status
+      variables:
+        schedule:
+          type: string
+          description: JSON schedule
+          example: '{"days" : [{ "events": ["14:00", ...]}, ...]}'
+      then:
+        - if:
+            condition:
+              - lambda: |-
+                  // Validate the data
+                  JsonDocument jschedule = esphome::json::parse_json(schedule);
+
+                  if (!jschedule["days"].is<JsonArray>()) {
+                    ESP_LOGW("api", "Error: Schedule missing 'days' array");
+                    return false;
+                  }
+                  JsonArray days = jschedule["days"];
+                  if (days.size() > 7) {
+                    ESP_LOGW("api", "Error: Schedule must contain at most 7 days");
+                    return false;
+                  }
+                  for (int ii = 0; ii < days.size(); ii++) {
+                    if (!days[ii].is<JsonObject>()) {
+                      ESP_LOGW("api", "Error: Schedule day is not JSON object");
+                      return false;
+                    }
+                    if (!days[ii]["events"].is<JsonArray>()) {
+                      ESP_LOGW("api", "Error: Schedule day missing events array");
+                      return false;
+                    }
+                    JsonArray events = days[ii]["events"];
+                    std::regex pattern("[0-9]{2}:[0-9]{2}"); // "HH:MM"
+                    for (int jj = 0; jj < events.size(); jj++) {
+                      if (!events[jj].is<JsonString>()) {
+                        ESP_LOGW("api", "Error: Schedule event is not string");
+                        return false;
+                      }
+                      std::string event(events[jj]);
+                      if (!regex_match(event, pattern)) {
+                        ESP_LOGW("api", "Error: Improperly formatted event %s", event.c_str());
+                        return false;
+                      }
+                    }
+                  }
+                  if (schedule.size() > 1023) {
+                    ESP_LOGW("api", "Error: Schedule is too large, size %d", schedule.size());
+                    return false;
+                  }
+                  std::strncpy(id(wake_schedule), schedule.c_str(), 1024);
+                  id(wake_schedule)[1023] = 0;
+                  return true;
+            then:
+              - api.respond:
+                  success: true
+              - script.execute:
+                  id: set_next_wake_time
+                  prev_wake_time: 0
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid Schedule"
+
+    - action: get_schedule
+      description: Get Wake Schedule
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              // I can't simply pass the json string I've stored :(
+              // This data field requires that I build a JsonObject,
+              // which it is just going to convert back to a string :*(
+              std::string  json(id(wake_schedule));
+              JsonDocument schedule = esphome::json::parse_json(json);
+              root["days"] = schedule["days"];
 
   on_client_connected:
     # Send events and button presses that triggered a wake-up.
@@ -259,7 +371,7 @@ api:
       # attempting to any communication.
       - delay: 2s
       - lambda: |-
-          ESP_LOGD("main", "api forward %d", id(wake_source));
+          ESP_LOGD("api", "api forward %d", id(wake_source));
           switch (id(wake_source)) {
             case 1:
               id(events).trigger("sleep_timeout");
@@ -276,14 +388,7 @@ api:
             default:
               break;
           }
-      - if:
-          condition: 
-            lambda: "return (id(wake_source) == 1);"
-          then:
-            # The esp32 internal RTC wakes us early due to drift.
-            # Send a wake_at_timeout event when the wake_at time actually
-            # arrives.
-            - script.execute: wake_time_timer
+      - script.execute: trigger_wake_event
       - globals.set: 
           id: wake_source
           value: '0'
@@ -448,11 +553,16 @@ binary_sensor:
     on_click:
       then:
         - logger.log: "KEY3 (GPIO3) pressed"
+        # Make some noise to acknowledge that the button press was recognized
+        - rtttl.play: ${rtttl_one_short}
+        - wait_until: 
+            condition:
+              not:
+                rtttl.is_playing:
+            timeout: 2s
         - event.trigger: 
             id: events
             event_type: right_button_press
-        # Make some noise to acknowledge that the button press was recognized
-        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -480,11 +590,16 @@ binary_sensor:
     on_click:
       then:
         - logger.log: "KEY4 (GPIO4) pressed"
+        # Make some noise to acknowledge that the button press was recognized
+        - rtttl.play: ${rtttl_one_short}
+        - wait_until: 
+            condition:
+              not:
+                rtttl.is_playing:
+            timeout: 2s
         - event.trigger: 
             id: events
             event_type: left_button_press
-        # Make some noise to acknowledge that the button press was recognized
-        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -512,11 +627,16 @@ binary_sensor:
     on_click:
       then:
         - logger.log: "KEY5 (GPIO5) pressed"
+        # Make some noise to acknowledge that the button press was recognized
+        - rtttl.play: ${rtttl_one_short}
+        - wait_until: 
+            condition:
+              not:
+                rtttl.is_playing:
+            timeout: 1s
         - event.trigger: 
             id: events
             event_type: refresh_button_press
-        # Make some noise to acknowledge that the button press was recognized
-        - rtttl.play: ${rtttl_one_short}
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
@@ -592,6 +712,8 @@ script:
   - id: show_improv_setup
     mode: single
     then:
+      - ble.enable
+      - rtttl.play: ${rtttl_scale_up}
       - if:
           condition:
             lambda: 'return !id(improv_setup_page_active);'
@@ -608,11 +730,9 @@ script:
             # which duplicates what Improv already does when ble is
             # enabled on boot.
             - logger.log: "show setup image"
-            - ble.enable
             - script.execute: sleep_prevent
             - display.page.show: improv_setup
             - component.update: epaper_display
-            - rtttl.play: ${rtttl_scale_up}
             - wait_until: 
                 condition:
                   component.is_idle: epaper_display
@@ -658,6 +778,107 @@ script:
                 then:
                   script.execute: show_improv_setup
 
+  - id: set_next_wake_time
+    mode: queued
+    parameters: 
+      prev_wake_time: time_t
+    then:
+      - lambda: |-
+          std::string json(id(wake_schedule));
+          JsonDocument schedule = esphome::json::parse_json(json);
+
+          ESPTime now = id(rtc_time).now();
+          if (prev_wake_time > now.timestamp) {
+            now = ESPTime::from_epoch_local(prev_wake_time);
+          }
+          ESPTime     next      = now;
+          int         now_dm    = now.hour * 60 + now.minute;
+          int         week_day  = now.day_of_week - 1;
+          int         day       = week_day;
+
+          // Search today's schedule for next wake-time
+          if (schedule["days"].is<JsonArray>() && day < schedule["days"].size()) {
+            if (schedule["days"][day]["events"].is<JsonArray>()) {
+              JsonArray day_sched = schedule["days"][day]["events"];
+              for (int ii = 0; ii < day_sched.size(); ii++) {
+                if (day_sched[ii].is<JsonString>()) {
+                  int hh, mm, dm;
+                  std::string time_str(day_sched[ii]);
+                  std::stringstream time_ss(time_str);
+                  time_ss >> hh;
+                  time_ss.ignore(1, ':');
+                  time_ss >> mm;
+                  dm = hh * 60 + mm;
+                  if (dm > now_dm) {
+                    // Next wake-up is today, set next wake-up
+                    next.hour = hh;
+                    next.minute = mm;
+                    next.second = 0;
+                    next.recalc_timestamp_local();
+                    ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
+                            id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
+                    id(next_wake_timestamp) = next.timestamp;
+                    return;
+                  }
+                }
+              }
+            }
+          }
+          // Check the first item in future day schedules
+          for (int ii = 1; ii <= 7; ii++) {
+            day = (week_day + ii) % 7;
+            next.increment_day();
+            if (schedule["days"].is<JsonArray>() && day < schedule["days"].size()) {
+              if (schedule["days"][day]["events"].is<JsonArray>() && schedule["days"][day]["events"].size()) {
+                int hh, mm;
+                JsonArray day_sched = schedule["days"][day]["events"];
+                if (day_sched[0].is<JsonString>()) {
+                  std::string time_str(day_sched[0]);
+                  std::stringstream time_ss(time_str);
+                  time_ss >> hh;
+                  time_ss.ignore(1, ':');
+                  time_ss >> mm;
+                  next.hour = hh;
+                  next.minute = mm;
+                  next.second = 0;
+                  next.recalc_timestamp_local();
+                  ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
+                          id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
+                  id(next_wake_timestamp) = next.timestamp;
+                  return;
+                }
+              }
+            }
+          }
+          // No future schedule item found, try again tomorrow
+          // This should only happen for an empty schedule
+          now.increment_day();
+          now.recalc_timestamp_local();
+          ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
+                  id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
+          id(next_wake_timestamp) = now.timestamp;
+      - script.execute:
+          id: eval_sleep_duration
+          run_duration: !lambda "return id(run_duration).state;"
+          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+          next_wake_time: !lambda "return id(next_wake_timestamp);"
+
+  - id: trigger_wake_event
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(wake_time_expired);'
+          then:
+            - event.trigger: 
+                id: events
+                event_type: wake_at_timeout
+            - globals.set:
+                id: wake_time_expired
+                value: 'false'
+
   # The esp32 internal RTC doesn't have a crystal and drifts, causing the time that we wake to
   # be inaccurate - early in every case I've seen. This script will wait for the requested 
   # wake time and then fire an event to notify that the actual requested time has arrived.
@@ -668,39 +889,29 @@ script:
     then:
       - if:
           condition:
-            lambda: 'return !id(use_wake_every);'
+            lambda: 'return id(use_schedule);'
           then:
             # Calculate how early we woke
             - lambda: |-
-                ESPTime  espNow    = id(rtc_time).now();
-                long int now       = espNow.timestamp;
+                ESPTime espNow    = id(rtc_time).now();
+                time_t  now       = espNow.timestamp;
       
-                std::tm next_tm = {};
-                next_tm.tm_year = espNow.year - 1900;
-                next_tm.tm_mon  = espNow.month - 1;
-                next_tm.tm_mday = espNow.day_of_month;
-                next_tm.tm_hour = id(wake_time).hour;
-                next_tm.tm_min  = id(wake_time).minute;
-                next_tm.tm_sec  = 0;
-                
-                long int wake_time = mktime(&next_tm) - espNow.timezone_offset();
-                if (now > wake_time + 60 * 60 * 12) {
-                  // Roll-over to the next day
-                  wake_time += 60 * 60 * 24;
-                }
-      
-                ESP_LOGD("wake_time_timer", "now %ld wake_time %ld", now, wake_time);
-                id(wake_at_delay) = wake_time - now;
+                ESP_LOGD("wake_time_timer", "now %lld wake_time %lld", now, id(next_wake_timestamp));
+                id(wake_at_delay) = id(next_wake_timestamp) - now;
             - if:
                 condition:
                   lambda: 'return id(wake_at_delay) <= 0;'
                 then:
+                  - globals.set:
+                      id: wake_time_expired
+                      value: 'true'
                   - logger.log:
-                      format: "Woke late or on time %d sec"
+                      format: "Woke late or on time %lld sec"
                       args: ['id(wake_at_delay)']
-                  - event.trigger: 
-                      id: events
-                      event_type: wake_at_timeout
+                  - script.execute: trigger_wake_event
+                  - script.execute:
+                      id: set_next_wake_time
+                      prev_wake_time: !lambda 'return id(rtc_time).now().timestamp;'
                 else:
                   - if:
                       condition:
@@ -709,42 +920,36 @@ script:
                         # We can safely stay awake and let the run time expire. The sleep
                         # timer will wake us again prior to the desired wake time.
                         - logger.log: 
-                            format: "Woke very early, sleeping for %d sec"
+                            format: "Woke very early, sleeping for %lld sec"
                             args: ['id(wake_at_delay)']
-                  - if:
-                      condition:
-                        lambda: 'return id(wake_at_delay) < id(run_duration).state * 60 - 30;'
-                      then:
-                        # We can safely delay (run time won't expire before delay completes)
+                      else:
+                        # Delay until the desired wake time
+                        # Since it's possible the run time may expire during this,
+                        # prevent sleep while waiting.
+                        - script.execute: sleep_prevent
                         - logger.log: 
-                            format: "Delay till 'Wake At' time %d sec"
+                            format: "Delay till 'Wake At' time %lld sec"
                             args: ['id(wake_at_delay)']
                         - delay: !lambda "return id(wake_at_delay) * 1000;"
-                        - event.trigger: 
-                            id: events
-                            event_type: wake_at_timeout
-                      else:
-                        # No man's land. We risk rescheduling wake up for tomorrow if we
-                        # let run time expire and we risk run time expiring if we delay.
-                        - logger.log: 
-                            format: "Woke early, sleeping... calculated delay %ds"
-                            args: ['id(wake_at_delay)']
-                        # If I let the run time expire, it may try to reschedule
-                        # for the same time tomorrow. So delay for a period of time
-                        # that is less than the run time. Then force a sleep so that
-                        # we wake again at the expected time.
-                        - delay: 30s
-                        - script.execute: do_sleep
+                        - globals.set:
+                            id: wake_time_expired
+                            value: 'true'
+                        - script.execute: trigger_wake_event
+                        - script.execute:
+                            id: set_next_wake_time
+                            prev_wake_time: id(next_wake_timestamp)
+                        - script.wait: trigger_wake_event
+                        - script.wait: set_next_wake_time
+                        - script.execute: sleep_allow
 
   # Handle changes to sleep duration
   #
   # run_duration    - minutes
-  #                   Used to adjust 'sleep_duration' when 'wake_time' is used
+  #                   Used to adjust 'sleep_duration' when schedule is used
   # run_sleep_cycle - minutes
   #                   When not using 'wake_at' sleep type, this is the run/sleep cycle time.
   #                   If run_duration >= run_sleep_cycle, sleep is disabled.
-  # wake_hour       - HH:MM time to wake when using 'wake_at' sleep type
-  # wake_minute
+  # next_wake_time  - time_t timestamp of next wake time
   #
   # Ideally, this would be called just prior to going into deep sleep
   # so that 'wake time' can be correctly calculated based on when
@@ -757,40 +962,31 @@ script:
     parameters: 
       run_duration: int # in minutes
       run_sleep_cycle: int # minutes
-      wake_hour: int
-      wake_minute: int
+      next_wake_time: time_t
     then:
       - lambda: |-
-          ESP_LOGD("eval_sleep_duration", "cycle %d, run %d, whour %d, wmin %d", run_sleep_cycle, run_duration, wake_hour, wake_minute);
-          long int duration;
-          if (id(use_wake_every))
+          ESP_LOGD("eval_sleep_duration", "cycle %d, run %d, next %lld", run_sleep_cycle, run_duration, next_wake_time);
+          time_t duration;
+          if (!id(use_schedule))
             duration = (run_sleep_cycle - run_duration) * 60 * 1000;
           else {
-            ESPTime  espNow    = id(rtc_time).now();
-            long int now       = espNow.timestamp;
-            long int runtime   = now - id(run_start_time);
-            long int remaining = run_duration * 60 - runtime;
-            long int run_end   = now;
+            ESPTime espNow    = id(rtc_time).now();
+            time_t  now       = espNow.timestamp;
+            time_t  runtime   = now - id(run_start_time);
+            time_t  remaining = run_duration * 60 - runtime;
+            time_t  run_end   = now;
             if (remaining > 0)
               run_end += remaining;
 
-            std::tm next_tm = {};
-            next_tm.tm_year = espNow.year - 1900;
-            next_tm.tm_mon  = espNow.month - 1;
-            next_tm.tm_mday = espNow.day_of_month;
-            next_tm.tm_hour = wake_hour;
-            next_tm.tm_min  = wake_minute;
-            next_tm.tm_sec  = 0;
-            
-            long int next = mktime(&next_tm) - espNow.timezone_offset();
-            ESP_LOGD("eval_sleep_duration", "now year %d mon %d mday %d hour %d min %d", 
-              next_tm.tm_year, next_tm.tm_mon, next_tm.tm_mday, next_tm.tm_hour, next_tm.tm_min);
-            ESP_LOGD("eval_sleep_duration", "now %ld next %ld run_end %ld diff %ld run_start_time %ld remaining %ld tzo %ld", 
-              now, next, run_end, next - run_end, id(run_start_time), remaining, espNow.timezone_offset());
-            if (next > run_end)
-              duration = (next - run_end) * 1000;
-            else
-              duration = (60 * 60 * 24 + next - run_end) * 1000;
+            ESP_LOGD("eval_sleep_duration", "now %lld next %lld run_end %lld diff %lld run_start_time %lld remaining %lld tzo %ld", 
+              now, next_wake_time, run_end, next_wake_time - run_end, id(run_start_time), remaining, espNow.timezone_offset());
+            duration = (next_wake_time - run_end) * 1000;
+            if (duration <= 0) {
+              // The next wake time is before the current run-time ends
+              // Recalculate the next wake time
+              id(set_next_wake_time).execute(run_end);
+              return;
+            }
           }
           if (id(sleep_enabled) && duration <= 0) {
             ESP_LOGD("eval_sleep_duration", "sleep prevent");
@@ -798,7 +994,7 @@ script:
             id(sleep_prevent).execute();
           }
           if (duration > 0) {
-            ESP_LOGD("eval_sleep_duration", "Set sleep duration: %ld ms", duration);
+            ESP_LOGD("eval_sleep_duration", "Set sleep duration: %lld ms", duration);
             id(dsleep).set_sleep_duration(duration);
           }
           if (!id(sleep_enabled) && duration > 0) {
@@ -815,8 +1011,7 @@ script:
           id: eval_sleep_duration
           run_duration: 0
           run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          wake_hour: !lambda "return id(wake_time).hour;"
-          wake_minute: !lambda "return id(wake_time).minute;"
+          next_wake_time: !lambda "return id(next_wake_timestamp);"
       - script.wait: eval_sleep_duration
       - lambda: id(sleep_pending) = true;
       - lambda: id(dsleep).begin_sleep(false);
@@ -855,8 +1050,7 @@ script:
                       id: eval_sleep_duration
                       run_duration: 0
                       run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-                      wake_hour: !lambda "return id(wake_time).hour;"
-                      wake_minute: !lambda "return id(wake_time).minute;"
+                      next_wake_time: !lambda "return id(next_wake_timestamp);"
                   - script.wait: eval_sleep_duration
             - logger.log: "Allow Sleep"
             - deep_sleep.allow: dsleep
@@ -968,46 +1162,43 @@ light:
     output: bsp_led
     id: onboard_led
 
-datetime:
-  # Time to wake when 'wake_at' sleep type is used
-  - platform: template
-    id: wake_time
-    name: Wake At
-    type: time
-    optimistic: true
-    restore_value: true
-    initial_value: "3:00:00"
-    set_action: 
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: !lambda "return id(run_duration).state;"
-          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          wake_hour: !lambda "return x.hour;"
-          wake_minute: !lambda "return x.minute;"
-
 select:
   # 'wake_at' vs 'wake_every' sleep type options
   - platform: template
     id: wake_timer_type
     name: Wake Timer Type
     icon: "mdi:timer-sand"
-    optimistic: true
     options: 
-      - Wake At
+      - Schedule
       - Wake Every
     initial_option: Wake Every
     restore_value: true
-    on_value:
-      then:
-        - lambda: |-
-            id(use_wake_every) = (i == 1);
-            ESP_LOGD("select", "index %d", i);
-        - script.execute:
-            id: eval_sleep_duration
-            run_duration: !lambda "return id(run_duration).state;"
-            run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-            wake_hour: !lambda "return id(wake_time).hour;"
-            wake_minute: !lambda "return id(wake_time).minute;"
+    optimistic: true
+    set_action:
+      - if:
+          condition:
+            not:
+              select.is:
+                id: wake_timer_type
+                lambda: |-
+                  ESP_LOGD("select", "current %s x %s", current.c_str(), x.c_str());
+                  return current.compare(x) == 0;
+          then:
+            - lambda: |-
+                id(use_schedule) = x.compare("Schedule") == 0;
+            - if:
+                condition:
+                  lambda: 'return id(use_schedule);'
+                then:
+                  - script.execute:
+                      id: set_next_wake_time
+                      prev_wake_time: 0
+                else:
+                  - script.execute:
+                      id: eval_sleep_duration
+                      run_duration: !lambda "return id(run_duration).state;"
+                      run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+                      next_wake_time: !lambda "return id(next_wake_timestamp);"
 
 number:
   # run/sleep cycle time when 'wake_every' sleep type is used
@@ -1029,8 +1220,7 @@ number:
           id: eval_sleep_duration
           run_duration: !lambda "return id(run_duration).state;"
           run_sleep_cycle: !lambda "return x;"
-          wake_hour: !lambda "return id(wake_time).hour;"
-          wake_minute: !lambda "return id(wake_time).minute;"
+          next_wake_time: !lambda "return id(next_wake_timestamp);"
   # How long to block sleep when there us user activity
   - platform: template
     id: activity_sleep_block_time
@@ -1072,8 +1262,7 @@ number:
           id: eval_sleep_duration
           run_duration: !lambda "return x;"
           run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          wake_hour: !lambda "return id(wake_time).hour;"
-          wake_minute: !lambda "return id(wake_time).minute;"
+          next_wake_time: !lambda "return id(next_wake_timestamp);"
 
 switch:
   # Sets landscape mode. Portrait mode is the default

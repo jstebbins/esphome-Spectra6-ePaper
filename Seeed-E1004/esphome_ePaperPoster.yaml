@@ -959,14 +959,14 @@ script:
                         - logger.log: 
                             format: "Delay till 'Wake At' time %lld sec"
                             args: ['id(wake_at_delay)']
-                        - delay: !lambda "return id(wake_at_delay) * 1000;"
+                        - delay: !lambda "return id(wake_at_delay) * 1000 + 500;"
                         - globals.set:
                             id: wake_time_expired
                             value: 'true'
                         - script.execute: trigger_wake_event
                         - script.execute:
                             id: set_next_wake_time
-                            prev_wake_time: id(next_wake_timestamp)
+                            prev_wake_time: !lambda 'return id(rtc_time).now().timestamp;'
                         - script.wait: trigger_wake_event
                         - script.wait: set_next_wake_time
                         - script.execute: sleep_allow

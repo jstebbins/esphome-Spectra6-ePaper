@@ -1206,31 +1206,25 @@ select:
     initial_option: Wake Every
     restore_value: true
     optimistic: true
+    on_value:
+      - lambda: |-
+          id(use_schedule) = x.compare("Schedule") == 0;
     set_action:
+      - lambda: |-
+          id(use_schedule) = x.compare("Schedule") == 0;
       - if:
           condition:
-            not:
-              select.is:
-                id: wake_timer_type
-                lambda: |-
-                  ESP_LOGD("select", "current %s x %s", current.c_str(), x.c_str());
-                  return current.compare(x) == 0;
+            lambda: 'return id(use_schedule);'
           then:
-            - lambda: |-
-                id(use_schedule) = x.compare("Schedule") == 0;
-            - if:
-                condition:
-                  lambda: 'return id(use_schedule);'
-                then:
-                  - script.execute:
-                      id: set_next_wake_time
-                      prev_wake_time: 0
-                else:
-                  - script.execute:
-                      id: eval_sleep_duration
-                      run_duration: !lambda "return id(run_duration).state;"
-                      run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-                      next_wake_time: !lambda "return id(next_wake_timestamp);"
+            - script.execute:
+                id: set_next_wake_time
+                prev_wake_time: 0
+          else:
+            - script.execute:
+                id: eval_sleep_duration
+                run_duration: !lambda "return id(run_duration).state;"
+                run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+                next_wake_time: !lambda "return id(next_wake_timestamp);"
 
 number:
   # run/sleep cycle time when 'wake_every' sleep type is used

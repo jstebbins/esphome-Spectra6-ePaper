@@ -46,6 +46,10 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: sleep_duration
+    type: time_t
+    restore_value: false
+    initial_value: '0'
   # Track when we wake from sleep. If we are put to sleep early
   # we must adjust the sleep period to keep the cycle time accurate.
   - id: run_start_time
@@ -532,6 +536,15 @@ sensor:
       id: hum_sensor
     update_interval: 60s
 
+  - platform: template
+    name: "Sleep Duration"
+    id: sleep_duration_sensor
+    icon: "mdi:timer-sand"
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      return id(sleep_duration) / 1000;
+
 binary_sensor:
   # API Connection status
   - platform: status
@@ -664,7 +677,7 @@ binary_sensor:
           # Long Buzz to notify that factory reset is initiated
           - rtttl.play: ${rtttl_one_long}
           - lambda: id(factory_reset_requested) = true;
-          
+
   # [9] SD card detect (LOW = card present)
   # SD 卡检测（低电平 = 卡已插入）
   #
@@ -691,6 +704,21 @@ binary_sensor:
       inverted: true
     id: sd_card_detect
     name: "SD Card Detected"
+
+text_sensor:
+  - platform: template
+    name: "Next wake time"
+    id: next_wake_time_sensor
+    icon: "mdi:clock"
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      if (id(next_wake_timestamp) == 0) {
+        return {};
+      }
+      ESPTime next = ESPTime::from_epoch_local(id(next_wake_timestamp));
+      std::string next_str = next.strftime("%c");
+      return {next_str};
 
 script:
   # Prevent sleep for a specified period of time when there is user activity
@@ -862,6 +890,7 @@ script:
           run_duration: !lambda "return id(run_duration).state;"
           run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
           next_wake_time: !lambda "return id(next_wake_timestamp);"
+      - component.update: next_wake_time_sensor
 
   - id: trigger_wake_event
     mode: single
@@ -996,12 +1025,14 @@ script:
           if (duration > 0) {
             ESP_LOGD("eval_sleep_duration", "Set sleep duration: %lld ms", duration);
             id(dsleep).set_sleep_duration(duration);
+            id(sleep_duration) = duration;
           }
           if (!id(sleep_enabled) && duration > 0) {
             ESP_LOGD("eval_sleep_duration", "sleep allow");
             id(sleep_enabled) = true;
             id(sleep_allow).execute();
           }
+      - component.update: sleep_duration_sensor
     
     # Handle request to immediately enter deep sleep
   - id: do_sleep
@@ -1013,6 +1044,7 @@ script:
           run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
           next_wake_time: !lambda "return id(next_wake_timestamp);"
       - script.wait: eval_sleep_duration
+      - delay: 1s
       - lambda: id(sleep_pending) = true;
       - lambda: id(dsleep).begin_sleep(false);
 

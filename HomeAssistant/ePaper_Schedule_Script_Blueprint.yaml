@@ -42,9 +42,11 @@ sequence:
       for_each: !input epaper_devices
       sequence:
         - variables:
-            mac: '{{ "_" + device_attr(repeat.item, "name")[-6:] + "_" }}'
+            epaper_device: '{{ repeat.item }}'
+            mac: '{{ "_" + device_attr(epaper_device, "name")[-6:] + "_" }}'
             set_schedule_action: '{{ "esphome.poster_seeed" + mac + "set_schedule" }}'
             index: '{{ repeat.index }}'
+            api_connection_entity: '{{ device_entities(epaper_device) | select("match", ".*_api_connection") | first }}'
             json_schedule: >-
               {% set count = epaper_devices | length %}
               {% set ns0 = namespace(days=[]) %}
@@ -52,7 +54,7 @@ sequence:
                 {% set ns1 = namespace(events=[]) %}
                 {% set event_count = wake_schedule[slideshow_schedule][day_of_week] | length %}
                 {% for ii in range(((event_count + count - 1) / count) | int) %}
-                  {% set jj = ii * count + repeat.index - 1 %}
+                  {% set jj = ii * count + index - 1 %}
                   {% if jj < event_count %}
                     {% set event = wake_schedule[slideshow_schedule][day_of_week][jj] %}
                     {% set from = event.from.strftime("%H:%M") %}
@@ -62,6 +64,13 @@ sequence:
                 {% set ns0.days = ns0.days + [{"events": ns1.events}] %}
               {% endfor %}
               {{ { "days": ns0.days } }}
+        - if:
+            - condition: template
+              value_template: '{{ is_state(api_connection_entity, "off") }}'
+          then:
+            - wait_for_trigger:
+                - trigger: template
+                  value_template: '{{ is_state(api_connection_entity, "on") }}'
         - action: '{{ set_schedule_action }}'
           data:
             schedule: '{{ json_schedule }}'

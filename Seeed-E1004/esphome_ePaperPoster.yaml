@@ -92,8 +92,19 @@ globals:
     type: time_t
     restore_value: true
     initial_value: '0'
-  - id: wake_schedule
-    type: char[1024]
+  # The schedule gets stored to NVS as compact int16_t events
+  # The low 6 bits are minutes, and remaining high bits are hours
+  # The space allocated permits ~ 7d x 24h - 20min intervals.
+  # I don't require more than this, but the sizes are easily adjusted...
+  #
+  # schedule_days is an array of indicies pointing to where a day's events start
+  - id: schedule_days
+    type: int16_t[8]
+    restore_value: true
+    initial_value: '{0,0,0,0,0,0,0,0}'
+  # schedule_events is a linear array that covers the entire week.
+  - id: schedule_events
+    type: int16_t[512]
     restore_value: true
     initial_value: '{0,0}'
     
@@ -285,6 +296,11 @@ api:
       then:
         - rtttl.play:
             rtttl: !lambda "return song_str;"
+    # Receive a JSON schedule.
+    # The schedule gets stored to NVS as compact int16_t events
+    # So the space allocated should allow ~ 7d x 24h - 20min interval
+    # fully populated schedule.
+    # I don't require more than this, but the sizes are easily adjusted...
     - action: set_schedule
       description: Set Wake Schedule
       supports_response: status
@@ -298,6 +314,7 @@ api:
             condition:
               - lambda: |-
                   // Validate the data
+                  int event_count = 0;
                   JsonDocument jschedule = esphome::json::parse_json(schedule);
 
                   if (!jschedule["days"].is<JsonArray>()) {
@@ -320,6 +337,7 @@ api:
                     }
                     JsonArray events = days[ii]["events"];
                     std::regex pattern("[0-9]{2}:[0-9]{2}"); // "HH:MM"
+                    event_count += events.size();
                     for (int jj = 0; jj < events.size(); jj++) {
                       if (!events[jj].is<JsonString>()) {
                         ESP_LOGW("api", "Error: Schedule event is not string");
@@ -332,12 +350,31 @@ api:
                       }
                     }
                   }
-                  if (schedule.size() > 1023) {
-                    ESP_LOGW("api", "Error: Schedule is too large, size %d", schedule.size());
+                  if (event_count > 512) {
+                    ESP_LOGW("api", "Error: Schedule is too large, events %d", event_count);
                     return false;
                   }
-                  std::strncpy(id(wake_schedule), schedule.c_str(), 1024);
-                  id(wake_schedule)[1023] = 0;
+
+                  // Store the schedule in a more compact format
+                  int next_event = 0;
+                  for (int ii = 0; ii < days.size(); ii++) {
+                    id(schedule_days)[ii] = next_event;
+                    JsonArray events = days[ii]["events"];
+                    for (int jj = 0; jj < events.size(); jj++) {
+                      int hh, mm;
+                      std::string event(events[jj]);
+                      std::stringstream event_ss(event);
+                      // Hour < 24, fits in 5 bits
+                      event_ss >> hh;
+                      event_ss.ignore(1, ':');
+                      // Minutes < 60, fits in 6 bits
+                      event_ss >> mm;
+                      id(schedule_events)[next_event] = (hh << 6) | mm;
+                      next_event++;
+                    }
+                  }
+                  // Mark the end of day 7's events
+                  id(schedule_days)[7] = next_event;
                   return true;
             then:
               - api.respond:
@@ -356,12 +393,19 @@ api:
       then:
         - api.respond:
             data: !lambda |-
-              // I can't simply pass the json string I've stored :(
-              // This data field requires that I build a JsonObject,
-              // which it is just going to convert back to a string :*(
-              std::string  json(id(wake_schedule));
-              JsonDocument schedule = esphome::json::parse_json(json);
-              root["days"] = schedule["days"];
+              JsonArray days = root["days"].to<JsonArray>();
+              for (int ii = 0; ii < 7; ii++) {
+                JsonObject day = days[ii].to<JsonObject>();
+                JsonArray events = day["events"].to<JsonArray>();
+                int event_count = id(schedule_days)[ii + 1] - id(schedule_days)[ii];
+                for (int jj = id(schedule_days)[ii]; jj < id(schedule_days)[ii + 1]; jj++) {
+                  unsigned char hh = id(schedule_events)[jj] >> 6;
+                  unsigned char mm = id(schedule_events)[jj] & 0x3f;
+                  char event[6];
+                  snprintf(event, 6, "%02hhd:%02hhd", hh, mm);
+                  events.add(event);
+                }
+              }
 
   on_client_connected:
     # Send events and button presses that triggered a wake-up.
@@ -812,9 +856,6 @@ script:
       prev_wake_time: time_t
     then:
       - lambda: |-
-          std::string json(id(wake_schedule));
-          JsonDocument schedule = esphome::json::parse_json(json);
-
           ESPTime now = id(rtc_time).now();
           if (prev_wake_time > now.timestamp) {
             now = ESPTime::from_epoch_local(prev_wake_time);
@@ -825,59 +866,44 @@ script:
           int         day       = week_day;
 
           // Search today's schedule for next wake-time
-          if (schedule["days"].is<JsonArray>() && day < schedule["days"].size()) {
-            if (schedule["days"][day]["events"].is<JsonArray>()) {
-              JsonArray day_sched = schedule["days"][day]["events"];
-              for (int ii = 0; ii < day_sched.size(); ii++) {
-                if (day_sched[ii].is<JsonString>()) {
-                  int hh, mm, dm;
-                  std::string time_str(day_sched[ii]);
-                  std::stringstream time_ss(time_str);
-                  time_ss >> hh;
-                  time_ss.ignore(1, ':');
-                  time_ss >> mm;
-                  dm = hh * 60 + mm;
-                  if (dm > now_dm) {
-                    // Next wake-up is today, set next wake-up
-                    next.hour = hh;
-                    next.minute = mm;
-                    next.second = 0;
-                    next.recalc_timestamp_local();
-                    ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
-                            id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
-                    id(next_wake_timestamp) = next.timestamp;
-                    return;
-                  }
-                }
+          for (int ii = id(schedule_days)[day]; ii < id(schedule_days)[day+1]; ii++) {
+              int event, hh, mm, dm;
+              event = id(schedule_events)[ii];
+
+              hh = event >> 6;
+              mm = event & 0x3f;
+              dm = hh * 60 + mm;
+              if (dm > now_dm) {
+                // Next wake-up is today, set next wake-up
+                next.hour = hh;
+                next.minute = mm;
+                next.second = 0;
+                next.recalc_timestamp_local();
+                ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
+                        id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
+                id(next_wake_timestamp) = next.timestamp;
+                return;
               }
-            }
           }
           // Check the first item in future day schedules
           for (int ii = 1; ii <= 7; ii++) {
             day = (week_day + ii) % 7;
             next.increment_day();
-            if (schedule["days"].is<JsonArray>() && day < schedule["days"].size()) {
-              if (schedule["days"][day]["events"].is<JsonArray>() && schedule["days"][day]["events"].size()) {
-                int hh, mm;
-                JsonArray day_sched = schedule["days"][day]["events"];
-                if (day_sched[0].is<JsonString>()) {
-                  std::string time_str(day_sched[0]);
-                  std::stringstream time_ss(time_str);
-                  time_ss >> hh;
-                  time_ss.ignore(1, ':');
-                  time_ss >> mm;
-                  next.hour = hh;
-                  next.minute = mm;
-                  next.second = 0;
-                  next.recalc_timestamp_local();
-                  ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
-                          id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
-                  id(next_wake_timestamp) = next.timestamp;
-                  return;
-                }
-              }
+
+            if (id(schedule_days)[ii] < id(schedule_days)[ii+1]) {
+              int event;
+              event = id(schedule_events)[ii];
+              next.hour = event >> 6;
+              next.minute = event & 0x3f;
+              next.second = 0;
+              next.recalc_timestamp_local();
+              ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
+                      id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
+              id(next_wake_timestamp) = next.timestamp;
+              return;
             }
           }
+
           // No future schedule item found, try again tomorrow
           // This should only happen for an empty schedule
           now.increment_day();

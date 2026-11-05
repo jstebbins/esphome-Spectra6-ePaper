@@ -52,11 +52,7 @@ globals:
     initial_value: '0'
   # Track when we wake from sleep. If we are put to sleep early
   # we must adjust the sleep period to keep the cycle time accurate.
-  - id: run_start_time
-    type: time_t
-    restore_value: false
-    initial_value: '0'
-  - id: run_end_time
+  - id: run_start_timestamp
     type: time_t
     restore_value: false
     initial_value: '0'
@@ -162,35 +158,28 @@ esphome:
       - component.update: battery_level
       # Read external RTC time on boot / 启动时读取 RTC 时间
       - pcf8563.read_time:
-      # Start the run timer. When it expires, we go into deep sleep mode
+      # Record boot time
       - lambda: |-
-          id(dsleep).set_run_duration(id(run_duration).state * 60 * 1000);
-          // Start the run timer
-          id(dsleep).setup();
-          id(run_start_time) = id(rtc_time).now().timestamp;
-          id(run_end_time) = id(run_start_time) + id(run_duration).state * 60 * 1000;
+          id(run_start_timestamp) = id(rtc_time).now().timestamp;
+      # Start the run_timer. This determines how long we will remain running
+      # before the next sleep.
+      - script.execute: run_timer
       - logger.log:
           format: 'Run start time: %lld'
-          args: ['id(run_start_time)']
+          args: ['id(run_start_timestamp)']
       - if:
-          condition: 
+          condition:
             lambda: "return (id(wake_source) <= 1);"
           then:
             # The esp32 internal RTC wakes us early due to drift.
             # Send a wake_at_timeout event when the wake_at time actually
             # arrives.
             - script.execute: wake_time_timer
-      # Initialize 'sleep_duration' for deep sleep
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: !lambda "return id(run_duration).state;"
-          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          next_wake_time: !lambda "return id(next_wake_timestamp);"
       # Run a short buzzer if wakeing up from button press
       # to indicate we are alive
       - if:
           condition:
-            lambda: 'return (id(wake_source) != 0 && id(wake_source) != 1);'
+            lambda: 'return id(wake_source) > 1;'
           then:
             - rtttl.play: ${rtttl_one_short}
       - if:
@@ -223,7 +212,7 @@ esp32:
   framework:
     type: esp-idf
     version: latest
-    advanced: 
+    advanced:
       execute_from_psram: true
       enable_idf_experimental_features: true
     sdkconfig_options:
@@ -379,9 +368,6 @@ api:
             then:
               - api.respond:
                   success: true
-              - script.execute:
-                  id: set_next_wake_time
-                  prev_wake_time: 0
             else:
               - api.respond:
                   success: false
@@ -437,7 +423,7 @@ api:
               break;
           }
       - script.execute: trigger_wake_event
-      - globals.set: 
+      - globals.set:
           id: wake_source
           value: '0'
 
@@ -452,7 +438,7 @@ ota:
         - script.execute: sleep_prevent
     on_progress:
       then:
-        - logger.log: 
+        - logger.log:
             format: "Progress %01f%%"
             args: ["x"]
     on_end:
@@ -612,19 +598,19 @@ binary_sensor:
         - logger.log: "KEY3 (GPIO3) pressed"
         # Make some noise to acknowledge that the button press was recognized
         - rtttl.play: ${rtttl_one_short}
-        - wait_until: 
+        - wait_until:
             condition:
               not:
                 rtttl.is_playing:
             timeout: 2s
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: right_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY3 (GPIO3) double pressed"
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: right_button_double_press
     on_release:
@@ -649,19 +635,19 @@ binary_sensor:
         - logger.log: "KEY4 (GPIO4) pressed"
         # Make some noise to acknowledge that the button press was recognized
         - rtttl.play: ${rtttl_one_short}
-        - wait_until: 
+        - wait_until:
             condition:
               not:
                 rtttl.is_playing:
             timeout: 2s
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: left_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY4 (GPIO4) double pressed"
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: left_button_double_press
     on_release:
@@ -686,25 +672,25 @@ binary_sensor:
         - logger.log: "KEY5 (GPIO5) pressed"
         # Make some noise to acknowledge that the button press was recognized
         - rtttl.play: ${rtttl_one_short}
-        - wait_until: 
+        - wait_until:
             condition:
               not:
                 rtttl.is_playing:
             timeout: 1s
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: refresh_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY5 (GPIO5) double pressed"
-        - event.trigger: 
+        - event.trigger:
             id: events
             event_type: refresh_button_double_press
     on_release:
       then:
         - script.execute: activity_sleep_prevent
-        - if: 
+        - if:
             condition:
               lambda: return id(factory_reset_requested);
             then:
@@ -765,6 +751,24 @@ text_sensor:
       return {next_str};
 
 script:
+  - id: run_timer
+    mode: single
+    then:
+      - script.execute: sleep_prevent
+      - while:
+          condition:
+            lambda: |-
+              time_t now_timestamp = id(rtc_time).now().timestamp;
+              if (now_timestamp - id(run_start_timestamp) >= id(run_duration).state * 60 
+                  && (id(use_schedule) || id(run_duration) < id(run_sleep_cycle))) {
+                // Run expired
+                return false;
+              }
+              return true;
+          then:
+            - delay: 30s
+      - script.execute: sleep_allow
+
   # Prevent sleep for a specified period of time when there is user activity
   # I.e. button presses
   #
@@ -790,7 +794,7 @@ script:
           condition:
             lambda: 'return !id(improv_setup_page_active);'
           then:
-            - globals.set: 
+            - globals.set:
                 id: improv_setup_page_active
                 value: 'true'
             # Improv will not automatically enable BLE when
@@ -805,7 +809,7 @@ script:
             - script.execute: sleep_prevent
             - display.page.show: improv_setup
             - component.update: epaper_display
-            - wait_until: 
+            - wait_until:
                 condition:
                   component.is_idle: epaper_display
                 timeout: 60s
@@ -819,7 +823,7 @@ script:
           condition:
             lambda: 'return id(improv_setup_page_active);'
           then:
-            - globals.set: 
+            - globals.set:
                 id: improv_setup_page_active
                 value: 'false'
             - logger.log: "show setup complete image"
@@ -827,7 +831,7 @@ script:
             - display.page.show: improv_setup_complete
             - component.update: epaper_display
             - rtttl.play: ${rtttl_popcorn}
-            - wait_until: 
+            - wait_until:
                 condition:
                   component.is_idle: epaper_display
                 timeout: 60s
@@ -852,7 +856,7 @@ script:
 
   - id: set_next_wake_time
     mode: queued
-    parameters: 
+    parameters:
       prev_wake_time: time_t
     then:
       - lambda: |-
@@ -911,12 +915,11 @@ script:
           ESP_LOGD("set_next_wake_time", "now %lld prev %lld next %lld",
                   id(rtc_time).now().timestamp, id(next_wake_timestamp), next.timestamp);
           id(next_wake_timestamp) = now.timestamp;
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: !lambda "return id(run_duration).state;"
-          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          next_wake_time: !lambda "return id(next_wake_timestamp);"
       - component.update: next_wake_time_sensor
+      - wait_until:
+          condition:
+            component.is_idle: next_wake_time_sensor
+          timeout: 2s
 
   - id: trigger_wake_event
     mode: single
@@ -927,7 +930,7 @@ script:
               - api.connected:
               - lambda: 'return id(wake_time_expired);'
           then:
-            - event.trigger: 
+            - event.trigger:
                 id: events
                 event_type: wake_at_timeout
             - globals.set:
@@ -964,9 +967,6 @@ script:
                       format: "Woke late or on time %lld sec"
                       args: ['id(wake_at_delay)']
                   - script.execute: trigger_wake_event
-                  - script.execute:
-                      id: set_next_wake_time
-                      prev_wake_time: !lambda 'return id(rtc_time).now().timestamp;'
                 else:
                   - if:
                       condition:
@@ -974,7 +974,7 @@ script:
                       then:
                         # We can safely stay awake and let the run time expire. The sleep
                         # timer will wake us again prior to the desired wake time.
-                        - logger.log: 
+                        - logger.log:
                             format: "Woke very early, sleeping for %lld sec"
                             args: ['id(wake_at_delay)']
                       else:
@@ -982,19 +982,15 @@ script:
                         # Since it's possible the run time may expire during this,
                         # prevent sleep while waiting.
                         - script.execute: sleep_prevent
-                        - logger.log: 
-                            format: "Delay till 'Wake At' time %lld sec"
+                        - logger.log:
+                            format: "Delay till scheduled event time %lld sec"
                             args: ['id(wake_at_delay)']
                         - delay: !lambda "return id(wake_at_delay) * 1000 + 500;"
                         - globals.set:
                             id: wake_time_expired
                             value: 'true'
                         - script.execute: trigger_wake_event
-                        - script.execute:
-                            id: set_next_wake_time
-                            prev_wake_time: !lambda 'return id(rtc_time).now().timestamp;'
                         - script.wait: trigger_wake_event
-                        - script.wait: set_next_wake_time
                         - script.execute: sleep_allow
 
   # Handle changes to sleep duration
@@ -1014,34 +1010,20 @@ script:
   # and when sleep is initiated manually.
   - id: eval_sleep_duration
     mode: restart
-    parameters: 
-      run_duration: int # in minutes
+    parameters:
       run_sleep_cycle: int # minutes
       next_wake_time: time_t
     then:
       - lambda: |-
-          ESP_LOGD("eval_sleep_duration", "cycle %d, run %d, next %lld", run_sleep_cycle, run_duration, next_wake_time);
+          ESP_LOGD("eval_sleep_duration", "cycle %d, next %lld", run_sleep_cycle, next_wake_time);
           time_t duration;
-          if (!id(use_schedule))
-            duration = (run_sleep_cycle - run_duration) * 60 * 1000;
-          else {
-            ESPTime espNow    = id(rtc_time).now();
-            time_t  now       = espNow.timestamp;
-            time_t  runtime   = now - id(run_start_time);
-            time_t  remaining = run_duration * 60 - runtime;
-            time_t  run_end   = now;
-            if (remaining > 0)
-              run_end += remaining;
-
-            ESP_LOGD("eval_sleep_duration", "now %lld next %lld run_end %lld diff %lld run_start_time %lld remaining %lld tzo %ld", 
-              now, next_wake_time, run_end, next_wake_time - run_end, id(run_start_time), remaining, espNow.timezone_offset());
-            duration = (next_wake_time - run_end) * 1000;
-            if (duration <= 0) {
-              // The next wake time is before the current run-time ends
-              // Recalculate the next wake time
-              id(set_next_wake_time).execute(run_end);
-              return;
-            }
+          time_t now_timestamp = id(rtc_time).now().timestamp;
+          if (!id(use_schedule)) {
+            time_t  run_duration = now_timestamp - id(run_start_timestamp);
+            duration = (run_sleep_cycle * 60 - run_duration) * 1000;
+          } else {
+            ESP_LOGD("eval_sleep_duration", "Schedule: now %lld next %lld", now_timestamp, next_wake_time);
+            duration = (next_wake_time - now_timestamp) * 1000;
           }
           if (id(sleep_enabled) && duration <= 0) {
             ESP_LOGD("eval_sleep_duration", "sleep prevent");
@@ -1059,18 +1041,22 @@ script:
             id(sleep_allow).execute();
           }
       - component.update: sleep_duration_sensor
+      - wait_until:
+          condition:
+            component.is_idle: sleep_duration_sensor
+          timeout: 2s
     
     # Handle request to immediately enter deep sleep
   - id: do_sleep
     mode: single
     then:
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: 0
-          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          next_wake_time: !lambda "return id(next_wake_timestamp);"
-      - script.wait: eval_sleep_duration
-      - delay: 1s
+      - if:
+          condition:
+            lambda: return !id(sleep_pending);
+          then:
+            # By asking for an immediate sleep, We are overriding the run_duration.
+            # The sleep_prevent executed by run_timer must be reversed to allow sleep.
+            - script.execute: sleep_allow
       - lambda: id(sleep_pending) = true;
       - lambda: id(dsleep).begin_sleep(false);
 
@@ -1102,14 +1088,17 @@ script:
           then:
             - if:
                 condition:
-                  lambda: return id(sleep_pending);
+                  lambda: 'return id(use_schedule);'
                 then:
                   - script.execute:
-                      id: eval_sleep_duration
-                      run_duration: 0
-                      run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-                      next_wake_time: !lambda "return id(next_wake_timestamp);"
-                  - script.wait: eval_sleep_duration
+                      id: set_next_wake_time
+                      prev_wake_time: !lambda 'return id(rtc_time).now().timestamp;'
+                  - script.wait: set_next_wake_time
+            - script.execute:
+                id: eval_sleep_duration
+                run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
+                next_wake_time: !lambda "return id(next_wake_timestamp);"
+            - script.wait: eval_sleep_duration
             - logger.log: "Allow Sleep"
             - deep_sleep.allow: dsleep
       - if:
@@ -1138,7 +1127,7 @@ script:
   # Deocde and display a PNG that is stored in read-only memory
   - id: show_png
     mode: single
-    parameters: 
+    parameters:
       display: esphome::display::Display*
       # index of image in images_png
       index: int
@@ -1226,7 +1215,7 @@ select:
     id: wake_timer_type
     name: Wake Timer Type
     icon: "mdi:timer-sand"
-    options: 
+    options:
       - Schedule
       - Wake Every
     initial_option: Wake Every
@@ -1235,22 +1224,6 @@ select:
     on_value:
       - lambda: |-
           id(use_schedule) = x.compare("Schedule") == 0;
-    set_action:
-      - lambda: |-
-          id(use_schedule) = x.compare("Schedule") == 0;
-      - if:
-          condition:
-            lambda: 'return id(use_schedule);'
-          then:
-            - script.execute:
-                id: set_next_wake_time
-                prev_wake_time: 0
-          else:
-            - script.execute:
-                id: eval_sleep_duration
-                run_duration: !lambda "return id(run_duration).state;"
-                run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-                next_wake_time: !lambda "return id(next_wake_timestamp);"
 
 number:
   # run/sleep cycle time when 'wake_every' sleep type is used
@@ -1267,12 +1240,7 @@ number:
     icon: "mdi:timer-sand"
     device_class: duration
     unit_of_measurement: min
-    set_action: 
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: !lambda "return id(run_duration).state;"
-          run_sleep_cycle: !lambda "return x;"
-          next_wake_time: !lambda "return id(next_wake_timestamp);"
+
   # How long to block sleep when there us user activity
   - platform: template
     id: activity_sleep_block_time
@@ -1302,19 +1270,10 @@ number:
     icon: "mdi:timer-sand"
     device_class: duration
     unit_of_measurement: min
-    set_action: 
-      - lambda: |-
-          ESP_LOGD("number", "run_duration %f", x);
-          id(dsleep).set_run_duration(x * 60 * 1000);
-          // I would really like to cancel the previous run timeout and
-          // start a fresh one here. But this is not currently possible
-          // with esphome :( So the updated run_duration will not take
-          // effect until the next cycle/reboot
-      - script.execute:
-          id: eval_sleep_duration
-          run_duration: !lambda "return x;"
-          run_sleep_cycle: !lambda "return id(run_sleep_cycle).state;"
-          next_wake_time: !lambda "return id(next_wake_timestamp);"
+    set_action:
+      - logger.log:
+          format: 'run_duration set to %f'
+          args: ['x']
 
 switch:
   # Sets landscape mode. Portrait mode is the default
@@ -1403,7 +1362,7 @@ image:
       - display.page.show: remote_image
       - lambda: 'id(epaper_display).set_rotation(id(landscape_mode).state ? DISPLAY_ROTATION_90_DEGREES : DISPLAY_ROTATION_0_DEGREES);'
       - component.update: epaper_display
-      - wait_until: 
+      - wait_until:
           condition:
             component.is_idle: epaper_display
           timeout: 60s
@@ -1458,11 +1417,26 @@ deep_sleep:
   #
   # Setting 'run_duration' here results in a non-cancelable run
   # timeout being set very early in the boot sequence. This means
-  # it can not be reset to some other value.  So I do not set
-  # 'run_duration' here and instead initialize it in the 'on_boot' block.
+  # it can not be reset to some other value.
+  #
+  # My solution is to set a run_duration that is just long enough to boot
+  # and start a run_timer script. The run_timer script executes my sleep_prevent
+  # script and delay's in a loop until the desired *actual* run_duration
+  # has expired. Then it executes my sleep_allow script, at wich point
+  # sleep will start.
+  #
+  # This has a couple of advantages.
+  # 1. If the run_duration is changed, it is applied to the current run
+  #    and does not need to wait till the next cycle. The default timer
+  #    based mechanism does not allow modification of the timer once started.
+  # 2. I now know *exactly* when sleep is going to start and can perform
+  #    actions just prior to sleep. The default timer based mechanism
+  #    is asynchronous with no callback when sleep starts. This allows
+  #    code simplification in a number of places.
   #
   # Default sleep duration 
-  # Is overridden by number 'sleep_duration' or datetime 'wake_time'
+  # Is overridden by number 'sleep_duration' or schedule event
+  run_duration: 45s
   sleep_duration: ${initial_run_sleep_cycle - initial_run_duration}min
   esp32_ext1_wakeup:
     pins:

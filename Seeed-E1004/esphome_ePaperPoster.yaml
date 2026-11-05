@@ -56,6 +56,10 @@ globals:
     type: time_t
     restore_value: false
     initial_value: '0'
+  - id: run_timer_delay
+    type: int
+    restore_value: false
+    initial_value: '0'
   # When the esp32 internal RTC wakes us early, this is the amount
   # of time we must wait before sending the wake_at_timeout event.
   - id: wake_at_delay
@@ -764,9 +768,16 @@ script:
                 // Run expired
                 return false;
               }
+              int delay = id(run_duration).state * 60 - (now_timestamp - id(run_start_timestamp));
+              if (delay < 0 || delay > 30) {
+                // delay < 0 means sleep is being deferred for some reason
+                // Max delay 30s to allow for on-the-fly changes to parameters
+                delay = 30;
+              }
+              id(run_timer_delay) = delay;
               return true;
           then:
-            - delay: 30s
+            - delay: !lambda "return id(run_timer_delay) * 1000;"
       - script.execute: sleep_allow
 
   # Prevent sleep for a specified period of time when there is user activity

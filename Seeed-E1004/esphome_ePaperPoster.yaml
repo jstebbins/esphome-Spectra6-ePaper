@@ -133,6 +133,7 @@ substitutions:
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
+  comment: Custom ePaper device firmware for Seeed Studio reTerminal E1004
   # Set an identifiable Manufacturer.Model that can be used in blueprints
   # to limit device options to devices that support the features implemented here.
   project:
@@ -753,6 +754,32 @@ text_sensor:
       ESPTime next = ESPTime::from_epoch_local(id(next_wake_timestamp));
       std::string next_str = next.strftime("%c");
       return {next_str};
+  # HomeAssistant does not have any way to find an action associated with
+  # a particular ESPHome device. In fact it has no user accessible way to
+  # list actions at all except through it's REST API.
+  #
+  # Given a HomeAssistant device id, I need to be able to find the
+  # user defined actions that can be called on that device.
+  #
+  # The prefix of a user defined action is the esphome device name.
+  # The remainder of the action name is just the action id.
+  # The esphome device name may have a mac address added to it. This name
+  # does not correspond the the 'name' attribute of a HomeAssistant
+  # device. And in fact, I can find no way to look up the esphome
+  # device name in HomeAssistant.
+  #
+  # Since I require the esphome device name in order to construct action names,
+  # and I can't recover the esphome device name from HomeAssistant,
+  # I am making it available through this text sensor.
+  - platform: template
+    name: "Device Name"
+    id: esphome_device_name
+    icon: "mdi:run"
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      std::string name(App.get_name());
+      return {name};
 
 script:
   - id: run_timer

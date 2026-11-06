@@ -1,0 +1,42 @@
+alias: ePaper Firmware Updater
+description: Update the firmware of a specified list of ePaper devices
+icon: mdi:update
+fields:
+  epaper_devices:
+    name: ePaper Devices
+    description: Devices to send images to
+    required: true
+    selector:
+      device:
+        multiple: true
+        filter:
+          - integration: esphome
+            manufacturer: "Stebbins"
+            model: "ePaperDisplay"
+mode: single
+max_exceeded: silent
+sequence:
+  - repeat:
+      for_each: '{{ epaper_devices }}'
+      sequence:
+        - variables:
+            epaper_device: '{{ repeat.item }}'
+            api_connection_entity: '{{ device_entities(epaper_device) | select("match", ".*_api_connection") | first }}'
+            update_entity: '{{ device_entities(epaper_device) | select("match", "update\..*") | first }}'
+        - if:
+            - condition: template
+              value_template: '{{ is_state(api_connection_entity, "off") }}'
+          then:
+            - wait_for_trigger:
+                - trigger: template
+                  value_template: '{{ is_state(api_connection_entity, "on") }}'
+        - if:
+            - condition: template
+              value_template: '{{ is_state(update_entity, "off") }}'
+          then:
+            - wait_for_trigger:
+                - trigger: template
+                  value_template: '{{ is_state(update_entity, "on") }}'
+        - action: update.install
+          target:
+            entity_id: '{{ update_entity }}'

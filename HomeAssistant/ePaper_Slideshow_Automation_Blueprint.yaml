@@ -102,8 +102,9 @@ actions:
       Images: '{{ state_attr(image_source, "filelist") }}'
       image_count: '{{ Images | length }}'
       epaper_device: '{{ device_id( trigger_entity_id ) }}'
-      mac: '{{ "_" + device_attr(epaper_device, "name")[-6:] + "_" }}'
-      show_image_action: '{{ "esphome.poster_seeed" + mac + "show_image" }}'
+      device_name: '{{ device_entities(epaper_device) | select("match", ".*_device_name") | first }}'
+      action_prefix: '{{ states(device_name) | replace("-", "_") }}'
+      show_image_action: '{{ "esphome." + action_prefix + "_show_image" }}'
       sleep_button_entity: '{{ device_entities(epaper_device) | select("match", ".*_sleep") | first }}'
       wake_timer_type: '{{ device_entities(epaper_device) | select("match", ".*_wake_timer_type") | first }}'
 

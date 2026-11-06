@@ -43,8 +43,9 @@ sequence:
       sequence:
         - variables:
             epaper_device: '{{ repeat.item }}'
-            mac: '{{ "_" + device_attr(epaper_device, "name")[-6:] + "_" }}'
-            set_schedule_action: '{{ "esphome.poster_seeed" + mac + "set_schedule" }}'
+            device_name: '{{ device_entities(epaper_device) | select("match", ".*_device_name") | first }}'
+            action_prefix: '{{ states(device_name) | replace("-", "_") }}'
+            set_schedule_action: '{{ "esphome." + action_prefix + "_set_schedule" }}'
             index: '{{ repeat.index }}'
             api_connection_entity: '{{ device_entities(epaper_device) | select("match", ".*_api_connection") | first }}'
             json_schedule: >-

@@ -15,11 +15,15 @@ but I've had a device running for over a week now on a 1 hour update interval an
 - HTTP Image download
 - Sleep cycle controls
 - Landscape/Portrait orientation control
-- Buzzer & LED control
+- Play RTTTL jingles through the buzzer
+- LED control
 
 # HomeAssistant Interaction
 
 - Blueprint for automating an image slideshow
+- Script to assist with firmware updates
+- Script to assist with loading sleep cycle schedules
+- Blueprint to assist with loading sleep cycle schedules
 - Example REST sensor for creating a file list entity
 
 # 3D-Print
@@ -28,6 +32,9 @@ but I've had a device running for over a week now on a 1 hour update interval an
 
 # Tools
 
-- dither.sh scales, beautifies borders, dithers, and remaps colors for best image quality on T133A01 display.
-- make_json_index.sh creates a json index of images used by HomeAssistant REST sensor.
-- make_html_index.sh creates an html index of images. Useful for preview of images in a browser.
+- dither.sh
+    - Scales, beautifies borders, dithers, and remaps colors for best image quality on T133A01 display.
+- make_json_index.sh
+    - Creates a json index of images used by HomeAssistant REST sensor.
+- make_html_index.sh
+    - Creates an html index of images. Useful for preview of images in a browser.

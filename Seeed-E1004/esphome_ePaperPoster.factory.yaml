@@ -4,7 +4,7 @@ packages:
 esphome:
   name_add_mac_suffix: true
   project:
-    version: dev
+    version: 26.11.08.0
   on_boot:
     priority: -99
     then:

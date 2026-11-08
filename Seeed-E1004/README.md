@@ -1,7 +1,7 @@
-- [Device Entities](#device)
+- [Device Entities](#device-entities)
 - [Code](#code)
 - [Build](#build)
-- [Hosting factory updates](#Hosting)
+- [Hosting factory updates](#hosting-factory-updates)
 
 # Notes about the device
 

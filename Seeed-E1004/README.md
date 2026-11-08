@@ -21,14 +21,14 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
     - An RTTTL script to play through the buzzer when `Play RTTTL` is pressed
 - Sleep: Button
     - Requests that the device enter sleep mode. The device may not immediately enter sleep mode if it is updating it's display or there has been recent user activity.
-- Wake At: Time HH:MM
-    - Wall clock time for the wake up event. Enabled if `Wake Timer Type` is set to `Wake At`.
 - Wake Duration: Number in minutes
     - The duration the device will stay awake if not manually put to sleep.
 - Wake Every: Number in minutes
     - The run/sleep cycle time. Enabled if `Wake Timer Type` is set to `Wake Every`.
 - Wake Timer Type: Selection
     - Determines what type of timer is used to cause the device to wake up.
+	    - Schedule - Wake at scheduled times. Schedule loaded via `set_schedule` action
+	    - Wake Every - Wake on an interval determined by `Wake Every` entity
 
 ### Sensors
 
@@ -64,6 +64,22 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
 
 - API Connection
     - Indicates when the device has connected to HomeAssistant
+
+### Actions
+- show_image
+    - Downloads and displays the image given by `image_url`
+
+    |Parameter|Type|
+	|----------|----|
+    |image_url|string|
+- set_schedule
+    - Sets the schedule used by `Schedule` wake timer type
+   
+    |Parameter|Type|
+	|----------|----|
+    |schedule|JSON|
+    - Example `{"days" : [{ "events": ["14:00", ...]}, ...]}`, days[0] is Sunday
+
 
 ## Code
 

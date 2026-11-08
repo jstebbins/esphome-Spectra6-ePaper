@@ -1,8 +1,8 @@
-- [Slideshow Blueprint](#Slideshow Blueprint)
-- [Firmware Update Script](#Firmware Update Script)
-- [Schedule Script](#Schedule Script)
-- [Schedule Blueprint](#Schedule Blueprint)
-- [File List REST Sensor](#File List REST Sensor)
+- [Slideshow Blueprint](#slideshow-blueprint)
+- [Firmware Update Script](#firmware-update-script)
+- [Schedule Script](#schedule-script)
+- [Schedule Blueprint](#schedule-blueprint)
+- [File List REST Sensor](#file-list-rest-sensor)
 
 ## Slideshow Blueprint
 The blueprint manages a slideshow for a collection of ePaper devices. 

@@ -1,5 +1,5 @@
 - [Dither](#dither)
-- [Make JSON Index](#make json index)
+- [Make JSON Index](#make-json-index)
 - 
 ## Dither
 The ePaper panel used by the Seeed Studio reTerminal E1004 is a T133A01. The colors it reproduces are documented in it's [specifications](https://files.seeedstudio.com/wiki/Other_Display/1330-E6-epaper/13.3_E6_eInk_Display_module_Datasheet.pdf) in the CIELAB color space.

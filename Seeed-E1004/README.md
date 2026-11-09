@@ -77,6 +77,13 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
     |Parameter|Type|
 	|----------|----|
     |image_url|string|
+- play_kazoo
+    - Plays the RTTTL formatted jingle give by `song_str`
+
+    |Parameter|Type|
+	|----------|----|
+    |song_str|string|
+    - Example `scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b`
 - set_schedule
     - Sets the schedule used by `Schedule` wake timer type
    
@@ -84,7 +91,8 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
 	|----------|----|
     |schedule|JSON|
     - Example `{"days" : [{ "events": ["14:00", ...]}, ...]}`, days[0] is Sunday
-
+- get_schedule
+    - Returns the current schedule used by `Schedule` wake timer type
 
 ## Code
 

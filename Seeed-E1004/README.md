@@ -1,7 +1,7 @@
 - [Device Entities](#device-entities)
 - [Code](#code)
 - [Build](#build)
-- [Hosting factory updates](#hosting-factory-updates)
+- [Self-Hosting Firmware](#self-hosting-firmware)
 
 # Notes about the device
 
@@ -123,16 +123,18 @@ esphome compile esphome_ePaperPoster.factory.yaml
 ```
 The bin files get deposited in `.esphome/build/poster-seeed/build/firmware.ota.bin` and `.esphome/build/poster-seeed/build/firmware.factory.bin`.
 
-## Hosting factory updates
-I've designed the device so you can host your own 'factory' updates over http(s). This makes keeping devices up-to-date easier if you are maintining several devices that all run the same firmware. ESPHome Builder forces you to keep a unique yaml file for each device with a unique device `name` if you want to perform OTA updates.
+## Self-Hosting Firmware
+I've designed the device so you can host your own 'factory' installs and OTA updates over http(s). This makes keeping devices up-to-date easier if you are maintining several devices that all run the same firmware.
 
-To host your own factory updates, you will require an http(s) server. HomeAssistant happens to supply one. Just create a `www` directory under `config` on your HomeAssistant server. Files in `www` will be served under `http://homeassistant.local:8123/local` (assuming HomeAssistant is configured to use port 8123).
+To host your own firmware, you will require an http(s) server. HomeAssistant happens to supply one. Just create a `www` directory under `config` on your HomeAssistant server. Files in `www` will be served under `http://homeassistant.local:8123/local` (assuming HomeAssistant is configured to use port 8123).
 
-The files you need to host are `manifest.json`, `poster-seeed-e1004-firmware.factory.bin`, and `poster-seeed-e1004-firmware.ota.bin`. The layout must be, e.g.
+### Prepare the web server
+The files you need to host are `index.html`, `manifest.json`, `poster-seeed-e1004-firmware.factory.bin`, and `poster-seeed-e1004-firmware.ota.bin`. The layout must be, e.g.
 ```
 www/
     firmware/
         e1004/
+			index.html
             manifest.json
             26.10.17.0/
                 poster-seeed-e1004-firmware.factory.bin
@@ -140,37 +142,52 @@ www/
 ```
 Where `26.10.17.0` is the version number that must be set in `esphome_ePaperPoster.factory.yaml` prior to building the firmware.
 
+A basic version of `index.html` is supplied in `Seeed-E1004`. It provides a button to invoke the [ESP Web Tools Installer](https://esphome.github.io/esp-web-tools/). You can use this to install the initial factory firmware to the device from your PC over USB.
+
 `manifest.json` is created with the script `create_manifest.py`. This script reads the version number from `esphome_ePaperPoster.factory.yaml` and fills out the manifest for you. It sends output to stdout, so usage looks like
 ```
 ./create_manifest.py esphome_ePaperPoster.factory.yaml > manifest.json
 ```
-To get this set up:
+### Prepare firmware binaries and manifest:
 
-1. Flash your device with an initial factory firmware with an appropriate version number. I.e. set the version number in `esphome_ePaperPoster.factory.yaml` and run
+1. Compile the firmware or obtain it from [Releases](https://github.com/jstebbins/esphome-Spectra6-ePaper/releases). If you are compiling from source, be sure to first set an appropriate version number in `esphome_ePaperPoster.factory.yaml`.
 ```
-esphome run --device /dev/ttyUSB0 esphome_ePaperPoster.factory.yaml
+esphome compile esphome_ePaperPoster.factory.yaml
 ```
-2. Create manifest.json. As a side effect, `create_manifest.py` copies the firmware files to the currnet working directory.
+2. Create manifest.json or obtain it from [Releases](https://github.com/jstebbins/esphome-Spectra6-ePaper/releases). As a side effect, `create_manifest.py` copies the firmware files to the currnet working directory.
 ```
 ./create_manifest.py esphome_ePaperPoster.factory.yaml > manifest.json
 ```
-3. Copy the required OTA update files to the locations described above on your http server.
+3. Copy the required files to the locations described above on your http server.
 ```
 scp poster-seeed-e1004-firmware.* root@homeassistant.local:config/www/firmware/e1004/26.10.17.0
 scp manifest.json root@homeassistant.local:config/www/firmware/e1004
+scp index.html root@homeassistant.local:config/www/firmware/e1004
+```
+### Flashing the initial firmware
+
+There are several ways to do this. 
+
+1. The easiest is to use the web installer. Open `http://homeassistant.local:8123/local/firmware/e1004/index.html` in a supported browser and press the `Connect` button to start the process. Supported browsers are Firefox and Chrome based browsers.
+2. Use ESPHome CLI
+```
+esphome upload --device /dev/ttyUSB0 --file poster-seeed-e1004-firmware.factory.bin esphome_ePaperPoster.factory.yaml
+```
+3. Use esptool
+```
+esptool --port /dev/ttyUSB write-flash 0 poster-seeed-e1004-firmware.factory.bin
 ```
 
-To perform an update:
+
+### Performing OTA updates
 
 - In HomeAssistant, find the device and enable the disabled Configuration entity `Update Manifest URL`
 - Set the value of `Update Manifest URL` to your `manifest.json` location. E.g.
 ```
 http://homeassistant.local:8123/local/firmware/e1004/manifest.json
 ```
-- Replace step 1 above with
-```
-esphome compile esphome_ePaperPoster.factory.yaml
-```
-and do steps 2 - 3. Be sure to increment your version number.
+- [Prepare firmware binaries and manifest](#prepare-firmware-binaries-and-manifest)
 
 The next time the device checks for updates, it should find a new update available.
+
+If you have multiple devices (as I do), it can be a PITA to wake each, one at a time, to perform multiple updates. One of the scripts I've provided assists with this [Firmware Update Script](../HomeAssistant/README.md#firmware-update-script).

@@ -11,7 +11,7 @@ Introduction
 - [Device Entities](Seeed-E1004/README.md#device-entities)
 - [Code](Seeed-E1004/README.md#code)
 - [Build](Seeed-E1004/README.md#build)
-- [Hosting factory updates](Seeed-E1004/README.md#hosting-factory-updates)
+- [Self-Hosting Firmware](Seeed-E1004/README.md#self-hosting-firmware)
 
 [HomeAssistant](HomeAssistant/README.md)
 

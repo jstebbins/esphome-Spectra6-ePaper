@@ -13,5 +13,7 @@ Uses [ESP Web Tools](https://esphome.github.io/esp-web-tools/) which uses [Web S
   src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
 ></script>
 
-<esp-web-install-button manifest="assets/firmware/e1004/manifest.json?nocache=123" ></esp-web-install-button>
+<p>
+  <esp-web-install-button manifest="assets/firmware/e1004/manifest.json?nocache=123" ></esp-web-install-button>
+</p>
 

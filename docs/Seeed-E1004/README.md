@@ -51,10 +51,11 @@ This is my first ESPHome device. So feel free to point out my errors or any fail
 
 ### Events
 
-- Actions
+- Sleep
     - sleep_timeout
     - wake_at_timeout
         - The ESP23 internal RTC used for sleep timeout drifts by minutes per hour because it is not connected to a crystal in this device. There is a second external RTC that keeps accurate time. I want the `Wake At` timer type to be accurate. So after waking up, the more accurate external RTC time is checked and `wake_at_timout` is sent at the appropriate time.
+- Button
     - refresh_button_press
     - left_button_press
     - right_button_press

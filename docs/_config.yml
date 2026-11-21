@@ -31,8 +31,8 @@ author:
 
 # Build settings
 #theme: minima
-#theme: jekyll-theme-hydejack
-remote_theme: hydecorp/hydejack
+theme: jekyll-theme-hydejack
+#remote_theme: hydecorp/hydejack
 theme_color: rgb(140, 107, 62)
 accent_color: rgb(140, 107, 62)
 accent_image: none

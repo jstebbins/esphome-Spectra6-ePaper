@@ -413,16 +413,16 @@ api:
           ESP_LOGD("api", "api forward %d", id(wake_source));
           switch (id(wake_source)) {
             case 1:
-              id(events).trigger("sleep_timeout");
+              id(events_sleep).trigger("sleep_timeout");
               break;
             case 3:
-              id(events).trigger("right_button_press");
+              id(events_button).trigger("right_button_press");
               break;
             case 4:
-              id(events).trigger("left_button_press");
+              id(events_button).trigger("left_button_press");
               break;
             case 5:
-              id(events).trigger("refresh_button_press");
+              id(events_button).trigger("refresh_button_press");
               break;
             default:
               break;
@@ -609,14 +609,14 @@ binary_sensor:
                 rtttl.is_playing:
             timeout: 2s
         - event.trigger:
-            id: events
+            id: events_button
             event_type: right_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY3 (GPIO3) double pressed"
         - event.trigger:
-            id: events
+            id: events_button
             event_type: right_button_double_press
     on_release:
       then:
@@ -646,14 +646,14 @@ binary_sensor:
                 rtttl.is_playing:
             timeout: 2s
         - event.trigger:
-            id: events
+            id: events_button
             event_type: left_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY4 (GPIO4) double pressed"
         - event.trigger:
-            id: events
+            id: events_button
             event_type: left_button_double_press
     on_release:
       then:
@@ -683,14 +683,14 @@ binary_sensor:
                 rtttl.is_playing:
             timeout: 1s
         - event.trigger:
-            id: events
+            id: events_button
             event_type: refresh_button_press
         # I would like to restart the run timout, but esphome doesn't support this :(
     on_double_click:
       then:
         - logger.log: "KEY5 (GPIO5) double pressed"
         - event.trigger:
-            id: events
+            id: events_button
             event_type: refresh_button_double_press
     on_release:
       then:
@@ -969,7 +969,7 @@ script:
               - lambda: 'return id(wake_time_expired);'
           then:
             - event.trigger:
-                id: events
+                id: events_sleep
                 event_type: wake_at_timeout
             - globals.set:
                 id: wake_time_expired
@@ -1324,13 +1324,19 @@ switch:
 event:
   # Events sent to HomeAssistant to notify of various actions
   - platform: template
-    name: Actions
+    name: Sleep
     icon: "mdi:run"
-    id: events
+    id: events_sleep
     device_class: button
     event_types:
       - sleep_timeout
       - wake_at_timeout
+  - platform: template
+    name: Buttons
+    icon: "mdi:run"
+    id: events_button
+    device_class: button
+    event_types:
       - refresh_button_press
       - left_button_press
       - right_button_press

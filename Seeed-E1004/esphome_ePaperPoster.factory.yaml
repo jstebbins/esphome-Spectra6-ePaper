@@ -39,7 +39,7 @@ update:
   - platform: http_request
     name: None
     id: update_http_request
-    source: "http://homeassistant.local:8123/local/firmware/e1004/manifest.json"
+    source: "https://jstebbins.github.io/esphome-Spectra6-ePaper/assets/firmware/e1004/manifest.json"
 
 dashboard_import:
   package_import_url: github://jstebbins/esphome-Spectra6-ePaper/Seeed-E1004/esphome_ePaperPoster.yaml

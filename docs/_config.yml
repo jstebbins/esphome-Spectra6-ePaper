@@ -1,0 +1,73 @@
+# Welcome to Jekyll!
+#
+# This config file is meant for settings that affect your whole blog, values
+# which you are expected to set up once and rarely edit after that. If you find
+# yourself editing this file very often, consider using Jekyll's data files
+# feature for the data you need to update frequently.
+#
+# For technical reasons, this file is *NOT* reloaded automatically when you use
+# 'bundle exec jekyll serve'. If you change this file, please restart the server process.
+#
+# If you need help with YAML syntax, here are some quick references for you:
+# https://learn-the-web.algonquindesign.ca/topics/markdown-yaml-cheat-sheet/#yaml
+# https://learnxinyminutes.com/docs/yaml/
+#
+# Site settings
+# These are used to personalize your new site. If you look in the HTML files,
+# you will see them accessed via {{ site.title }}, {{ site.email }}, and so on.
+# You can create any custom variable you would like, and they will be accessible
+# in the templates via {{ site.myvariable }}.
+
+title: ESPHome ePaper Frame
+description: >- # this means to ignore newlines until "baseurl:"
+  ESPHome custom firmware for the Seeed Studio reTerminal E1004 6-color ePaper display
+baseurl: "/esphome-Spectra6-ePaper" # the subpath of your site, e.g. /blog
+url: "https://jstebbins.github.io" # the base hostname & protocol for your site, e.g. http://example.com
+twitter_username:
+
+author:
+  social:
+    github: jstebbins/esphome-Spectra6-ePaper
+
+# Build settings
+#theme: minima
+theme: jekyll-theme-hydejack
+theme_color: rgb(140, 107, 62)
+accent_color: rgb(140, 107, 62)
+accent_image: none
+plugins:
+  - jekyll-feed
+
+# Exclude from processing.
+# The following items will not be processed, by default.
+# Any item listed under the `exclude:` key here will be automatically added to
+# the internal "default list".
+#
+# Excluded items can be processed by explicitly listing the directories or
+# their entries' file path in the `include:` list.
+#
+# exclude:
+#   - .sass-cache/
+#   - .jekyll-cache/
+#   - gemfiles/
+#   - Gemfile
+#   - Gemfile.lock
+#   - node_modules/
+#   - vendor/bundle/
+#   - vendor/cache/
+#   - vendor/gems/
+#   - vendor/ruby/
+
+menu:
+  - title: Device Details
+    url:   /device/#device-entities
+  - title: Preparing Images
+    url:   /tools/#dither
+  - title: Create A Slideshow
+    url:   /homeassistant/#slideshow-blueprint
+  - title: Flexible Schedules
+    url:   /homeassistant/#schedule-script
+  - title: Self Hosting Firmware
+    url:   /device/#self-hosting-firmware
+  - title: Install Firmware
+    url:   /install/

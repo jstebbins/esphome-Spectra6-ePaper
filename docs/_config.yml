@@ -68,7 +68,7 @@ menu:
     url:   /homeassistant/#slideshow-blueprint
   - title: Flexible Schedules
     url:   /homeassistant/#schedule-script
-  - title: Self Hosting Firmware
+  - title: Self-Host Firmware
     url:   /device/#self-hosting-firmware
   - title: Install Firmware
     url:   /install/

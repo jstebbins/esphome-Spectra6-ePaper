@@ -194,14 +194,14 @@ scp index.html root@homeassistant.local:config/www/firmware/e1004
 
 There are several ways to do this. 
 
-1. The easiest is to use the web installer. Open `http://homeassistant.local:8123/local/firmware/e1004/index.html` in a supported browser and press the `Connect` button to start the process. Supported browsers are Firefox and Chrome based browsers.
+1. The easiest is to use the [ESP Web Tools Installer](https://esphome.github.io/esp-web-tools/). Open the [installer](http://homeassistant.local:8123/local/firmware/e1004/index.html) in a supported browser and press the `Connect` button to start the process. Supported browsers are Firefox and Chrome based browsers.
 2. Use ESPHome CLI
 ```
 esphome upload --device /dev/ttyUSB0 --file poster-seeed-e1004-firmware.factory.bin esphome_ePaperPoster.factory.yaml
 ```
 3. Use esptool
 ```
-esptool --port /dev/ttyUSB write-flash 0 poster-seeed-e1004-firmware.factory.bin
+esptool --port /dev/ttyUSB0 write-flash 0 poster-seeed-e1004-firmware.factory.bin
 ```
 
 ### Performing OTA updates
@@ -215,4 +215,4 @@ http://homeassistant.local:8123/local/firmware/e1004/manifest.json
 
 The next time the device checks for updates, it should find a new update available.
 
-If you have multiple devices (as I do), it can be a PITA to wake each, one at a time, to perform multiple updates. One of the scripts I've provided assists with this [Firmware Update Script](../HomeAssistant/README.md#firmware-update-script).
+If you have multiple devices (as I do), it can be a PITA to wake each, one at a time, to perform multiple updates. One of the scripts I've provided assists with this [Firmware Update Script]({{ "/homeassistant/#firmware-update-script" | relative_url }}).

@@ -161,7 +161,7 @@ The files you need to host are `index.html`, `manifest.json`, `poster-seeed-e100
 www/
     firmware/
         e1004/
-			index.html
+            index.html
             manifest.json
             latest/
                 poster-seeed-e1004-firmware.factory.bin

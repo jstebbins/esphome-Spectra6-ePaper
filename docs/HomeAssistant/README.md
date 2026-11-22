@@ -59,7 +59,7 @@ User inputs to the script are:
     - These are the devices that images will be displayed on. Only devices with `manufacturer` `Stebbins` and `model` `ePaperDisplay` are permitted here. This ensures they have to required entities.
 
 ## File List REST Sensor
-The file list sensor is a REST sensor that provides information required by the above blueprint. The sensor fetches a JSON dictionary index of files. The JSON index is created with `tools/make_json_index.sh`
+The file list sensor is a REST sensor that provides information required by the above blueprint. The sensor fetches a JSON dictionary index of files. The JSON index is created with [Make JSON Index]({{ "/tools/#make-json-index" | relative_url }}).
 
 [Get it on GitHub](https://raw.githubusercontent.com/jstebbins/esphome-Spectra6-ePaper/refs/heads/main/HomeAssistant/sensors.yaml)
 

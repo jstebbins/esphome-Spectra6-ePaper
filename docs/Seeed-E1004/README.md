@@ -112,12 +112,12 @@ Most of the device code is in `esphome_ePaperPoster.yaml`. If you want to takeov
 then this is the file you need. The file `esphome_ePaperPoster.factory.yaml` contains the bits needed to perform factory OTA updates
 for a fleet of devices.
 
-There are 2 images that get compiled in to the firmware. These are `setup.png` and `setup_complete.png`. They are converted to C header files and included in
+There are 2 images that get compiled in to the firmware. These are `setup.png` and `setup_complete.png`. They are converted to a C header file and included in
 ```
 esphome:
 	includes:
 ```
-To create the header files, I use e.g.
+To create the header file, I use e.g.
 ```
 xxd -i setup.png setup_image.h
 ```
@@ -129,13 +129,28 @@ Then I make the data const so it stays in read-only memory and adjust the data t
 This is all necessary in order to store compressed images in read-only memory and only decompress them when they are needed. ESPHome does not currently have a built-in way to do this.
 
 ## Build
-I use ESPHome CLI tools. ESPHome Builder is really not suitable for a project more complex than one yaml file. To build the factory and OTA bin files:
+I use [ESPHome CLI tools](https://esphome.io/install/). ESPHome Builder is really not suitable for a project more complex than one yaml file.
+
+I recommend installing the ESPHome CLI tools as a Python virtual environment in some directory appropriate to your development environment.
+The Python virtual environment keeps the ESPHome tools isolated from your main system Python environment and is only active when you activate it.
+```
+uv venv esphome                 # create python virtual environment named esphome
+source esphome/bin/activate     # activate the virtual environment
+uv pip install esphome          # install esphome cli tools in the virtual environment
+```
+
+To build the factory and OTA bin files:
 ```
 esphome compile esphome_ePaperPoster.factory.yaml
 ```
 The bin files get deposited in `.esphome/build/poster-seeed/build/firmware.ota.bin` and `.esphome/build/poster-seeed/build/firmware.factory.bin`.
 
 ## Self-Hosting Firmware
+Given the current environment of AI exposed vulnerabilities and supply chain hacks, it's understandable to be cautious of
+some rando stranger handing out tasty firmware. So I've tried to make it as easy as possible for you to take full control
+of the device. ESPHome Builder has a mechanism for taking control of devices one at a time. But, if you want to perform OTA
+updates, this mechanism requires maintaining a separate YAML for each device, even when they are running the same code.
+
 I've designed the device so you can host your own 'factory' installs and OTA updates over http(s). This makes keeping devices up-to-date easier if you are maintining several devices that all run the same firmware.
 
 To host your own firmware, you will require an http(s) server. HomeAssistant happens to supply one. Just create a `www` directory under `config` on your HomeAssistant server. Files in `www` will be served under `http://homeassistant.local:8123/local` (assuming HomeAssistant is configured to use port 8123).
@@ -148,13 +163,11 @@ www/
         e1004/
 			index.html
             manifest.json
-            26.10.17.0/
+            latest/
                 poster-seeed-e1004-firmware.factory.bin
                 poster-seeed-e1004-firmware.ota.bin
 ```
-Where `26.10.17.0` is the version number that must be set in `esphome_ePaperPoster.factory.yaml` prior to building the firmware.
-
-A basic version of `index.html` is supplied in `Seeed-E1004`. It provides a button to invoke the [ESP Web Tools Installer](https://esphome.github.io/esp-web-tools/). You can use this to install the initial factory firmware to the device from your PC over USB.
+A basic version of `index.html` is supplied in `Seeed-E1004`. It provides a button to invoke the [ESP Web Tools Installer](https://esphome.github.io/esp-web-tools/). You can use this to install the initial factory firmware to the device from your PC over USB Serial.
 
 `manifest.json` is created with the script `create_manifest.py`. This script reads the version number from `esphome_ePaperPoster.factory.yaml` and fills out the manifest for you. It sends output to stdout, so usage looks like
 ```
@@ -172,10 +185,11 @@ esphome compile esphome_ePaperPoster.factory.yaml
 ```
 3. Copy the required files to the locations described above on your http server.
 ```
-scp poster-seeed-e1004-firmware.* root@homeassistant.local:config/www/firmware/e1004/26.10.17.0
+scp poster-seeed-e1004-firmware.* root@homeassistant.local:config/www/firmware/e1004/latest
 scp manifest.json root@homeassistant.local:config/www/firmware/e1004
 scp index.html root@homeassistant.local:config/www/firmware/e1004
 ```
+
 ### Flashing the initial firmware
 
 There are several ways to do this. 
@@ -189,7 +203,6 @@ esphome upload --device /dev/ttyUSB0 --file poster-seeed-e1004-firmware.factory.
 ```
 esptool --port /dev/ttyUSB write-flash 0 poster-seeed-e1004-firmware.factory.bin
 ```
-
 
 ### Performing OTA updates
 

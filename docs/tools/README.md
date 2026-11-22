@@ -42,16 +42,16 @@ Options:
 What the script does:
 
 - Resizes the input to 1200x1600 (portrait) or 1600x1200 (landscape). The aspect ratio is kept, so result image may be narrower or wider.
-- Creates a `spread` image that fills the 1200x1600 frame and overlays the resized image over it. This provides a nice transitional border for images that do not scale to perfectly fit 1200x1600.
+- Creates a [spread](https://usage.imagemagick.org/transform/#spread) image that fills the 1200x1600 frame and overlays above the resized image over it. This provides a nice transitional border for images that do not scale to perfectly fit 1200x1600.
 - Performs Floyd Steinberg dithering of the image
 - Remaps dithered colors to fully saturated RGB values
 
 ## Make JSON Index
 [Get it on GitHub](https://github.com/jstebbins/esphome-Spectra6-ePaper/raw/refs/heads/main/tools/make_json_index.sh)
 
-The HomeAssistant slideshow automation blueprint I provide requires a list of files to serve to the device. The script takes a list of files on the command line and generates a JSON representation of the file list.
+The HomeAssistant slideshow automation blueprint I provide requires a list of files to serve to the device. This script takes a list of files on the command line and generates a JSON representation of the file list.
 
-The generated file `index.json` is used by the File List REST Sensor I provide to create a sensor that can be queried for the list of files, which are in the `filelist` attribute of the sensor.
+The generated file `index.json` is used by the [File List REST Sensor]({{ "/homeassistant/#file-list-rest-sensor" | relative_url }}) I provide to create a sensor that can be queried for the list of files, which are in the `filelist` attribute of the sensor.
 
 The script is pretty basic, and if you want to change the `title` or `description` you'll have to edit the script.
 

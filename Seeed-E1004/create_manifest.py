@@ -78,12 +78,12 @@ class Manifest:
         part = self.manifest["builds"][0]["parts"][0]
 
         self.manifest["version"] = version
-        ota["path"] = version + "/" + base_firmware_name + ".ota.bin"
+        ota["path"] = "latest/" + base_firmware_name + ".ota.bin"
         ota["md5"] = hash_it(hashlib.md5(), base_firmware_name + ".ota.bin")
         ota["sha256"] = hash_it(hashlib.sha256(), base_firmware_name + ".ota.bin")
         ota["release_url"] = base_release_url + version
 
-        part["path"] = version + "/" + base_firmware_name + ".factory.bin"
+        part["path"] = "latest/" + base_firmware_name + ".factory.bin"
         part["md5"] = hash_it(hashlib.md5(), base_firmware_name + ".factory.bin")
         part["sha256"] = hash_it(hashlib.sha256(), base_firmware_name + ".factory.bin")
 

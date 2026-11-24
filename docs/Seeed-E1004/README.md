@@ -12,10 +12,13 @@ permalink: /device/
 ## Device Entities
 ### Controls
 
+All controls are backed up to NVS. So be mindful of flash wear.
+
 - Activity Timeout: Number in minutes
     - When a button is pressed on the device, sleep will be prevented for this amount of time
 - Image URL: Text entry
-    - The image URL to load when `Refresh Display` is pressed
+    - The image URL to load when `Refresh Display` is pressed. It's OK to use this for infrequent display
+updates. But I recommend using the `show_image` action for slideshows that continueously update.
 - Landscape: Switch
     - Sets the frame to landscape display mode (default mode is Portrait)
 - Onboard LED: Switch
@@ -25,7 +28,8 @@ permalink: /device/
 - Refresh Display: Button
     - Initiates an update of the display using `Image URL`
 - RTTTL Song: Text entry
-    - An RTTTL script to play through the buzzer when `Play RTTTL` is pressed
+    - An RTTTL script to play through the buzzer when `Play RTTTL` is pressed. This control is limited to 255 characters.
+If you want to play longer jingles, use the `play_kazoo` action.
 - Sleep: Button
     - Requests that the device enter sleep mode. The device may not immediately enter sleep mode if it is updating it's display or there has been recent user activity.
 - Wake Duration: Number in minutes

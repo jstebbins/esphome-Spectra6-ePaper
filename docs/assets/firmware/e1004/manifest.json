@@ -1,24 +1,24 @@
 {
   "name": "Stebbins.ePaperDisplay",
-  "version": "26.11.08.0",
+  "version": "26.11.25.0",
   "home_assistant_domain": "esphome",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "ota": {
-        "path": "26.11.08.0/poster-seeed-e1004-firmware.ota.bin",
-        "md5": "7776b24627744252cf691436bd064310",
-        "sha256": "5fd8472eab5734c4cad09cdcd79f768ee76600fd9f3eaa16d8a7c898d5ca6410",
+        "path": "latest/poster-seeed-e1004-firmware.ota.bin",
+        "md5": "d15d7e7d2a70bad4ec3f2f12caa0d036",
+        "sha256": "4a854f26b416cb679b8319f3044d428696cd8485f2dd41eb8f6b9b627c9172c2",
         "summary": "",
-        "release_url": "https://github.com/jstebbins/esphome-Spectra6-ePaper/releases/tag/26.11.08.0"
+        "release_url": "https://github.com/jstebbins/esphome-Spectra6-ePaper/releases/tag/26.11.25.0"
       },
       "parts": [
         {
-          "path": "26.11.08.0/poster-seeed-e1004-firmware.factory.bin",
+          "path": "latest/poster-seeed-e1004-firmware.factory.bin",
           "offset": 0,
-          "md5": "3863cf9cfff4d20a98ac51ff21fef899",
-          "sha256": "46b4db2f7e19cf38112d78826011667114d746048ebb4bd5c641cbd571ea150e"
+          "md5": "52fd1ecdedec4b32395241cdd49099ee",
+          "sha256": "a7dbfabeb94ccef238036b7501540ab4d4aad0c0e15cf5d08647623ffb9d285b"
         }
       ]
     }
